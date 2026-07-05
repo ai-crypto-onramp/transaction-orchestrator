@@ -1,5 +1,7 @@
 # Transaction Orchestrator
 
+![CI](https://github.com/ai-crypto-onramp/transaction-orchestrator/actions/workflows/ci.yml/badge.svg)
+
 The saga engine tying payment -> policy -> sign -> deliver into one atomic, recoverable flow with compensation.
 
 ## Overview / Responsibilities
