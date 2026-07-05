@@ -1,6 +1,7 @@
 # Transaction Orchestrator
 
 ![CI](https://github.com/ai-crypto-onramp/transaction-orchestrator/actions/workflows/ci.yml/badge.svg)
+[![codecov](https://codecov.io/gh/ai-crypto-onramp/transaction-orchestrator/branch/main/graph/badge.svg)](https://codecov.io/gh/ai-crypto-onramp/transaction-orchestrator)
 
 The saga engine tying payment -> policy -> sign -> deliver into one atomic, recoverable flow with compensation.
 
