@@ -5,3 +5,4 @@ vendor/
 *.log
 coverage.out
 *.testcoverage.out
+/transaction-orchestrator

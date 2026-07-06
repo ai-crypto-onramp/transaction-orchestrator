@@ -262,6 +262,7 @@ Responsibilities:
 ```bash
 # Build
 go build -o bin/orchestrator ./cmd/orchestrator
+go build -o bin/orchctl ./cmd/orchctl
 
 # Run (requires PostgreSQL, Redis, and stubbed partner services)
 go run ./cmd/orchestrator
@@ -271,6 +272,13 @@ go test ./...
 
 # Integration tests (spins up partner service stubs)
 go test -tags=integration ./...
+
+# Migrations (embedded SQL, applied via the migrate command).
+# make migrate-up applies all *.up.sql; make migrate-down rolls them back.
+# The default DSN points at a throwaway local Postgres on :5433 — spin one up
+# with `make pg-start`, or point DB_DSN at your own instance.
+make migrate-up DB_DSN="postgres://orch:orch@localhost:5432/orch"
+make migrate-down DB_DSN="postgres://orch:orch@localhost:5432/orch"
 
 # Saga replay tooling — replay a finished tx from its persisted step history
 # against stub partner services (dry-run, no side effects):
