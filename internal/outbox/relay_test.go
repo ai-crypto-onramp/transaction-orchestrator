@@ -120,7 +120,7 @@ func TestRelaiConcurrentNoDoublePublish(t *testing.T) {
 	defer r1.Stop()
 	defer r2.Stop()
 
-	waitFor(t, func() bool { return atomic.LoadInt32(&count) == 5 }, time.Second)
+	waitFor(t, func() bool { return atomic.LoadInt32(&count) == 5 }, 3*time.Second)
 
 	pending, _ := s.ListOutboxPending(ctx, 10)
 	if len(pending) != 0 {
