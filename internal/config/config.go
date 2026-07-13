@@ -112,14 +112,6 @@ func Load() (Config, error) {
 
 	var missing []string
 	for k, v := range map[string]string{
-		"DB_URL":       c.DBURL,
-		"REDIS_URL":    c.RedisURL,
-		"POLICY_URL":   c.PolicyURL,
-		"PAYMENT_URL":  c.PaymentURL,
-		"KYT_URL":      c.KytURL,
-		"MPC_URL":      c.MpcURL,
-		"BLOCKCHAIN_URL": c.BlockchainURL,
-		"LEDGER_URL":   c.LedgerURL,
 		"EVENT_BUS_URL": c.EventBusURL,
 	} {
 		if v == "" {

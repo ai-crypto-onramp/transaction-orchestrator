@@ -27,6 +27,12 @@ func requiredAll() map[string]string {
 	}
 }
 
+func requiredMinimal() map[string]string {
+	return map[string]string{
+		"EVENT_BUS_URL": "nats://localhost:4222",
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
 	setEnvs(t, requiredAll())
 	c, err := Load()
@@ -51,8 +57,8 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadMissingRequired(t *testing.T) {
-	for k := range requiredAll() {
-		setEnvs(t, requiredAll())
+	for k := range requiredMinimal() {
+		setEnvs(t, requiredMinimal())
 		t.Setenv(k, "")
 		_, err := Load()
 		if err == nil || !errors.Is(err, ErrRequired) {
