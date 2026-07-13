@@ -22,9 +22,9 @@ partner service yet — it is pure persistence + state-machine logic.
 
 ### Tasks
 
-- [ ] Define Go module layout: `internal/`, `cmd/orchestrator/`, `cmd/orchctl/`,
+- [x] Define Go module layout: `internal/`, `cmd/orchestrator/`, `cmd/orchctl/`,
       `internal/store/`, `internal/saga/`, `internal/statemachine/`.
-- [ ] Write SQL migrations (or embed via `golang-migrate`) for:
+- [x] Write SQL migrations (or embed via `golang-migrate`) for:
       - `transactions` (`tx_id`, `user_id`, `quote_id`, `amount`, `asset`,
         `rail`, `dest_address`, `status`, `created_at`, `updated_at`,
         `version`).
@@ -36,15 +36,15 @@ partner service yet — it is pure persistence + state-machine logic.
       - `outbox_events` (`event_id`, `tx_id`, `event_type`, `step`, `attempt`,
         `payload` JSONB, `created_at`, `published_at`, `status`, dedup_key)
         with index on `(status)` and unique index on dedup_key.
-- [ ] Implement `internal/store/` with a `Store` interface (BeginTx, CreateTx,
+- [x] Implement `internal/store/` with a `Store` interface (BeginTx, CreateTx,
       UpdateStep, LoadSagaState, SaveSagaState, AppendOutbox) backed by
       `pgxpool`.
-- [ ] Implement `internal/statemachine/` — typed states
+- [x] Implement `internal/statemachine/` — typed states
       (`created, policy_checked, payment_captured, kyt_screened, signed,
       broadcasted, confirmed, ledgered, completed, failed_compensated,
       failed`), allowed transitions, guard that rejects illegal moves, and
       unit tests over the full transition table.
-- [ ] Add config loading (`DB_URL`, `REDIS_URL`, timeouts) via env vars (table
+- [x] Add config loading (`DB_URL`, `REDIS_URL`, timeouts) via env vars (table
       in README) using `envconfig` or equivalent.
 
 ### Acceptance criteria
@@ -69,9 +69,9 @@ hook is in place.
 
 ### Tasks
 
-- [ ] Scaffold `cmd/orchestrator` (HTTP server, graceful shutdown, health
+- [x] Scaffold `cmd/orchestrator` (HTTP server, graceful shutdown, health
       `/healthz`, readiness `/readyz`).
-- [ ] Implement `POST /v1/transactions`:
+- [x] Implement `POST /v1/transactions`:
       - Validate request body (`user_id`, `quote_id`, `amount`, `asset`,
         `rail`, `dest_address`).
       - Insert `transactions` row with `status = created`, `version = 1`.
@@ -79,12 +79,12 @@ hook is in place.
       - Insert `saga_state` (`state = created`, `current_step = policy`).
       - Insert `outbox_events` (`transaction.created`).
       - All within a single DB transaction.
-- [ ] Implement `GET /v1/transactions/:id` returning full state + current
+- [x] Implement `GET /v1/transactions/:id` returning full state + current
       step + history.
-- [ ] Implement `GET /v1/transactions/:id/steps` returning ordered step list.
-- [ ] Add a `QuoteLocker` interface with a no-op default implementation and
+- [x] Implement `GET /v1/transactions/:id/steps` returning ordered step list.
+- [x] Add a `QuoteLocker` interface with a no-op default implementation and
       wire it into the create path (real Redis-backed impl in Stage 8).
-- [ ] Add structured logging (zap or slog) and request IDs.
+- [x] Add structured logging (zap or slog) and request IDs.
 
 ### Acceptance criteria
 
@@ -107,11 +107,11 @@ for this step (no side effect yet) per the README matrix.
 
 ### Tasks
 
-- [ ] Define the `Step` interface in `internal/saga/`:
+- [x] Define the `Step` interface in `internal/saga/`:
       `Execute(ctx, *SagaContext) (StepResult, error)` and
       `Compensate(ctx, *SagaContext) error`.
 - [ ] Generate gRPC client stubs for `policy-risk-engine` (proto contract).
-- [ ] Implement `PolicyStep.Execute`:
+- [x] Implement `PolicyStep.Execute`:
       - Call policy-risk-engine with `(user_id, quote_id, amount, asset,
         rail, dest_address)`.
       - Honor per-step timeout (`STEP_TIMEOUT_POLICY_SECONDS`).
@@ -119,10 +119,10 @@ for this step (no side effect yet) per the README matrix.
         `failed_compensated` (no compensation needed for policy).
       - On policy allow -> mark step `succeeded`, transition saga to
         `policy_checked`, write `outbox_events` for the transition.
-- [ ] Implement `PolicyStep.Compensate` as a no-op that returns nil.
-- [ ] Idempotency: build `idempotency_key = sha256(tx_id || step_name ||
+- [x] Implement `PolicyStep.Compensate` as a no-op that returns nil.
+- [x] Idempotency: build `idempotency_key = sha256(tx_id || step_name ||
       attempt)`; the step refuses to execute twice for the same attempt.
-- [ ] Wire the worker dispatcher: when a `saga_state` row enters `created`,
+- [x] Wire the worker dispatcher: when a `saga_state` row enters `created`,
       an in-process worker picks it up and runs `PolicyStep`.
 
 ### Acceptance criteria
@@ -147,17 +147,17 @@ capture: refund.
 ### Tasks
 
 - [ ] Generate gRPC client stubs for `payment-orchestration`.
-- [ ] Implement `PaymentStep.Execute`:
+- [x] Implement `PaymentStep.Execute`:
       - Call `Authorize` then `Capture` on payment-orchestration.
       - Store `auth_id` and `capture_id` into `saga_state.payload` (JSONB).
       - Transition to `payment_captured` on success; write outbox event.
       - Honor `STEP_TIMEOUT_PAYMENT_SECONDS`.
-- [ ] Implement `PaymentStep.Compensate`:
+- [x] Implement `PaymentStep.Compensate`:
       - If `auth_id` set and `capture_id` empty -> call `VoidAuthorization`.
       - If `capture_id` set -> call `Refund`.
       - Record compensation in `transaction_steps` (`compensating` ->
         `compensated`).
-- [ ] Update the partial-failure matrix: when `PaymentStep.Execute` fails, the
+- [x] Update the partial-failure matrix: when `PaymentStep.Execute` fails, the
       orchestrator runs `PolicyStep.Compensate` (no-op) then
       `PaymentStep.Compensate` in reverse order.
 
@@ -184,17 +184,17 @@ or unrecoverable error: refund the captured payment and move to
 ### Tasks
 
 - [ ] Generate gRPC client stubs for `aml-kyt-screening`.
-- [ ] Implement `KytStep.Execute`:
+- [x] Implement `KytStep.Execute`:
       - Call `Screen` with `(user_id, dest_address, tx_id, amount, asset)`.
       - Honor `STEP_TIMEOUT_KYT_SECONDS` (note: KYT p99 <2s).
       - On `review`/`reject` -> mark failed, transition to
         `failed_compensated`.
       - On `clear` -> mark `succeeded`, transition to `kyt_screened`,
         write outbox event.
-- [ ] Implement `KytStep.Compensate`:
+- [x] Implement `KytStep.Compensate`:
       - Triggers `PaymentStep.Compensate` (refund) — compensation cascades
         backward through completed steps.
-- [ ] Verify compensation ordering: policy (no-op) -> payment (refund) ->
+- [x] Verify compensation ordering: policy (no-op) -> payment (refund) ->
   kyt (none of its own).
 
 ### Acceptance criteria
@@ -218,22 +218,22 @@ signed-payload handoff. Transitions `kyt_screened -> signed -> broadcasted
 ### Tasks
 
 - [ ] Generate gRPC stubs for `mpc-signing-service` and `blockchain-gateway`.
-- [ ] Implement `MpcSignStep.Execute`:
+- [x] Implement `MpcSignStep.Execute`:
       - Call `Sign` with unsigned tx hex from `saga_state.payload`.
       - Store `signed_tx_hex` into `saga_state.payload`.
       - Transition to `signed`; write outbox event.
-- [ ] Implement `MpcSignStep.Compensate`: refund payment (cascade).
-- [ ] Implement `BroadcastStep.Execute`:
+- [x] Implement `MpcSignStep.Compensate`: refund payment (cascade).
+- [x] Implement `BroadcastStep.Execute`:
       - Call `Broadcast` with `signed_tx_hex`; store returned `tx_hash`.
       - Transition to `broadcasted`; outbox event.
       - Guard against double-broadcast: idempotency key on
         `(tx_id, step_name, attempt)` plus a Redis lease so only one replica
         broadcasts.
-- [ ] Implement `BroadcastStep.Compensate`:
+- [x] Implement `BroadcastStep.Compensate`:
       - Refund payment, but note on-chain tx may already be in mempool — log
         the `tx_hash` to audit-event-log and mark for monitoring; do not
         attempt on-chain reversal.
-- [ ] Implement confirmation polling hook: `BroadcastStep` optionally waits
+- [x] Implement confirmation polling hook: `BroadcastStep` optionally waits
       for `confirmed` via blockchain-gateway status call (configurable; can
       be deferred to a separate poller).
 
@@ -261,12 +261,12 @@ notification / audit-event-log.
 ### Tasks
 
 - [ ] Generate gRPC stubs for `ledger-accounting`.
-- [ ] Implement `LedgerStep.Execute`:
+- [x] Implement `LedgerStep.Execute`:
       - Call `PostDoubleEntry` with `(tx_id, amount, asset, rail, user_id)`.
       - Store `ledger_journal_id` into `saga_state.payload`.
       - Transition to `ledgered` then `completed` (terminal success);
         outbox event.
-- [ ] Implement `LedgerStep.Compensate` as a no-op (per README: reconcile
+- [x] Implement `LedgerStep.Compensate` as a no-op (per README: reconcile
       async; ledger posting is retried, no on-chain compensation).
       Persist a `ledger.reconcile_required` outbox event so an out-of-band
       job can reconcile.
@@ -279,7 +279,7 @@ notification / audit-event-log.
 - [ ] Implement event-bus publisher abstraction with NATS and Kafka
       implementations behind one interface; selected by `EVENT_BUS_URL`
       scheme.
-- [ ] Emit events for: state transitions, step start/success/failure,
+- [x] Emit events for: state transitions, step start/success/failure,
       compensation start/success, terminal states.
 
 ### Acceptance criteria
@@ -306,13 +306,13 @@ production Docker image.
 
 ### Tasks
 
-- [ ] Implement retry: exponential backoff (`RETRY_BASE_BACKOFF_MS` ->
+- [x] Implement retry: exponential backoff (`RETRY_BASE_BACKOFF_MS` ->
       `RETRY_MAX_BACKOFF_MS`) with jitter, capped at `MAX_RETRIES` per step.
-- [ ] Implement per-step timeouts wired from env (per-step overrides in
+- [x] Implement per-step timeouts wired from env (per-step overrides in
       README).
 - [ ] Implement Redis lease manager (`LEASE_TTL_SECONDS`) — acquire before
       executing a step; release on success; renew on long steps.
-- [ ] Implement crash recovery: on startup, scan `saga_state` for in-flight
+- [x] Implement crash recovery: on startup, scan `saga_state` for in-flight
       rows whose lease has expired; re-queue them. Recovery completes within
       30s of startup.
 - [ ] Build `cmd/orchctl`:

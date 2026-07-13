@@ -1,13 +1,13 @@
 .PHONY: build test run lint docker-build docker-run clean
 
 build:
-	go build -o bin/server .
+	go build -o bin/server ./cmd/orchestrator
 
 test:
-	go test ./... -race -coverprofile=coverage.out -coverpkg=./...
+	go test ./cmd/... ./internal/... -race -coverprofile=coverage.out -coverpkg=./...
 
 run:
-	go run .
+	go run ./cmd/orchestrator
 
 lint:
 	go vet ./...
