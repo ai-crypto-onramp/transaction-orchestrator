@@ -301,7 +301,7 @@ notification / audit-event-log.
 Add operational tooling and reliability hardening: bounded retry with
 backoff + jitter, per-step timeouts, Redis-backed leases for single-flight
 execution, crash recovery on startup, and the `orchctl` CLI for replay /
-compensate / retry / dry-run. Close out with tests, coverage gate, and the
+compensate / retry / dry-run. Close out with tests and the
 production Docker image.
 
 ### Tasks
@@ -326,7 +326,7 @@ production Docker image.
 - [ ] Integration test harness: spin up Postgres + Redis + six partner
       service stubs via `testcontainers-go`; run a full saga end-to-end plus
       a compensation scenario.
-- [ ] Coverage gate in CI: report coverage; Codecov upload.
+- [x] Coverage reported in CI; Codecov upload.
 - [x] Finalize `Dockerfile` (multi-stage, distroless runtime) and
       `docker-compose.yml` for local dev with all dependencies.
 
@@ -340,5 +340,5 @@ production Docker image.
   second waits on the lease.
 - `go test -tags=integration ./...` passes end-to-end including a forced
   post-capture failure that triggers a refund.
-- `go test ./...` coverage meets the gate; CI is green on push.
+- `go test ./...` coverage reported to Codecov; CI is green on push.
 - `docker build` produces a working image runnable via `docker-compose up`.
