@@ -1,4 +1,5 @@
-.PHONY: build test run lint cover docker-build docker-run clean
+.PHONY: build test run lint cover docker-build docker-run clean \
+	migrate-up migrate-down migrate-new
 
 build:
 	go build -o bin/server ./cmd/orchestrator
@@ -8,6 +9,18 @@ test:
 
 run:
 	go run ./cmd/orchestrator
+
+migrate-up:
+	go run ./cmd/migrate -direction up
+
+migrate-down:
+	go run ./cmd/migrate -direction down
+
+migrate-new:
+	@test -n "$(NAME)" || (echo "usage: make migrate-new NAME=add_widgets" && exit 1)
+	@next=$$(printf '%04d' $$(( $$(ls internal/migrations/*.up.sql 2>/dev/null | wc -l | tr -d ' ') + 1 ))); \
+	touch internal/migrations/$${next}_$(NAME).up.sql internal/migrations/$${next}_$(NAME).down.sql; \
+	echo "created internal/migrations/$${next}_$(NAME).{up,down}.sql"
 
 lint:
 	golangci-lint run

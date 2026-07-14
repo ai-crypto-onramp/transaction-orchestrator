@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/migrations"
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/statemachine"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -18,11 +19,16 @@ type PgStore struct {
 	pool *pgxpool.Pool
 }
 
-// NewPgStore opens a pool against dsn and returns a ready PgStore.
+// NewPgStore opens a pool against dsn, applies the embedded migrations, and
+// returns a ready PgStore.
 func NewPgStore(ctx context.Context, dsn string) (*PgStore, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("pgxpool.New: %w", err)
+	}
+	if err := migrations.Up(ctx, pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("migrations.Up: %w", err)
 	}
 	return &PgStore{pool: pool}, nil
 }
