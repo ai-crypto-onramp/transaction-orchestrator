@@ -1,8 +1,8 @@
-.PHONY: build test run lint cover docker-build docker-run clean \
+.PHONY: build test run lint coverage docker-build docker-run clean \
 	migrate-up migrate-down migrate-new
 
 build:
-	go build -o bin/server ./cmd/orchestrator
+	go build -o bin/transaction-orchestrator ./cmd/orchestrator
 
 test:
 	go test ./cmd/... ./internal/... -race -coverprofile=coverage.out -coverpkg=./cmd/...,./internal/...
@@ -11,10 +11,10 @@ run:
 	go run ./cmd/orchestrator
 
 migrate-up:
-	go run ./cmd/migrate -direction up
+	go run ./cmd/migrate --up
 
 migrate-down:
-	go run ./cmd/migrate -direction down
+	go run ./cmd/migrate --down
 
 migrate-new:
 	@test -n "$(NAME)" || (echo "usage: make migrate-new NAME=add_widgets" && exit 1)
@@ -25,7 +25,7 @@ migrate-new:
 lint:
 	golangci-lint run
 
-cover: test
+coverage: test
 	go tool cover -func=coverage.out | tail -1
 
 docker-build:
