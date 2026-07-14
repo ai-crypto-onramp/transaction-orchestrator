@@ -407,4 +407,202 @@ func TestStepErrorMessages(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("expected not-configured error, got %v", err)
 	}
+	// Compensate on a nil-client step should also error for payment.
+	if err := (&PaymentStep{}).Compensate(context.Background(), &SagaContext{}); err == nil {
+		t.Fatal("expected payment compensate error on nil client")
+	}
+	// BroadcastStep.Compensate with an audit client records an audit event.
+	stub := partner.NewStub(partner.DefaultStubConfig())
+	bc := NewBroadcastStep(stub)
+	if err := bc.Compensate(context.Background(), &SagaContext{
+		Tx: store.Transaction{TxID: "tx-audit"},
+		Saga: store.SagaState{Payload: map[string]any{"tx_hash": "0xh"}},
+		Partners: &Clients{Audit: stub},
+	}); err != nil {
+		t.Fatalf("broadcast compensate: %v", err)
+	}
+	if stub.AuditCalls == 0 {
+		t.Fatal("expected audit record on broadcast compensate")
+	}
+	// LedgerStep.Compensate is a no-op.
+	if err := (&LedgerStep{client: stub}).Compensate(context.Background(), &SagaContext{}); err != nil {
+		t.Fatalf("ledger compensate: %v", err)
+	}
+}
+
+// TestCompensateCascadeManual exercises the exported CompensateCascade path
+// and the saga DefaultConfig helper.
+func TestCompensateCascadeManual(t *testing.T) {
+	s := store.NewMemStore()
+	seedCtx(t, s, "tx-casc")
+	stub := partner.NewStub(partner.DefaultStubConfig())
+	c := &Clients{Policy: stub, Payment: stub, Kyt: stub, Mpc: stub, Blockchain: stub, Ledger: stub, Audit: stub}
+	ex := NewExecutor(s, c, DefaultConfig())
+	ctx := runWithLog(context.Background())
+	// Advance to payment_captured so compensation will refund.
+	if err := ex.Run(ctx, "tx-casc", "test"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	tx, _ := s.LoadTx(ctx, "tx-casc")
+	if tx.Status != statemachine.StateCompleted {
+		t.Fatalf("expected completed, got %s", tx.Status)
+	}
+	// Now manually call CompensateCascade for the ledger step (no-op) to
+	// exercise the exported wrapper; it should not error because ledger
+	// compensate is a no-op.
+	if err := ex.CompensateCascade(ctx, "tx-casc", "test", ex.Steps[5]); err != nil {
+		t.Fatalf("CompensateCascade: %v", err)
+	}
+}
+
+// TestDefaultConfigSanity just exercises DefaultConfig so it is covered.
+func TestDefaultConfigSanity(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.MaxRetries != 5 || cfg.BaseBackoff <= 0 || cfg.MaxBackoff <= 0 || cfg.StepTimeout == nil {
+		t.Fatalf("unexpected DefaultConfig: %+v", cfg)
+	}
+}
+
+// heldLease always returns ok=false to exercise the backoff branch in Run.
+type heldLease struct{}
+
+func (heldLease) Acquire(ctx context.Context, txID, owner string, ttl time.Duration) (func(), bool, error) {
+	return func() {}, false, nil
+}
+
+// TestRunLeaseHeldExitsOnContextCancel verifies Run exits when the context is
+// cancelled while waiting for a held lease.
+func TestRunLeaseHeldExitsOnContextCancel(t *testing.T) {
+	s := store.NewMemStore()
+	seedCtx(t, s, "tx-held")
+	stub := partner.NewStub(partner.DefaultStubConfig())
+	c := &Clients{Policy: stub, Payment: stub, Kyt: stub, Mpc: stub, Blockchain: stub, Ledger: stub, Audit: stub}
+	ex := NewExecutor(s, c, testCfg())
+	ex.Lease = heldLease{}
+	ctx, cancel := context.WithCancel(runWithLog(context.Background()))
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	if err := ex.Run(ctx, "tx-held", "test"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+// TestValidatePathTwoHopAndEqual exercises the two-hop and equal-state branches
+// of validatePath.
+func TestValidatePathTwoHopAndEqual(t *testing.T) {
+	if err := validatePath(statemachine.StateCreated, statemachine.StateCreated, statemachine.StateCreated); err != nil {
+		t.Fatalf("equal path should be nil, got %v", err)
+	}
+	// Two-hop: created -> policy_checked -> payment_captured is legal.
+	if err := validatePath(statemachine.StateCreated, statemachine.StatePolicyChecked, statemachine.StatePaymentCaptured); err != nil {
+		t.Fatalf("two-hop legal path should be nil, got %v", err)
+	}
+	// Two-hop with illegal first hop should error.
+	if err := validatePath(statemachine.StateCreated, statemachine.StateCompleted, statemachine.StatePaymentCaptured); err == nil {
+		t.Fatal("expected illegal first hop to error")
+	}
+	// Two-hop with illegal second hop should error.
+	if err := validatePath(statemachine.StateCreated, statemachine.StatePolicyChecked, statemachine.StateSigned); err == nil {
+		t.Fatal("expected illegal second hop to error")
+	}
+}
+
+// TestStepByNameNotFound exercises the not-found branch of StepByName.
+func TestStepByNameNotFound(t *testing.T) {
+	ex := &Executor{}
+	if ex.StepByName("nope") != nil {
+		t.Fatal("expected nil for unknown step")
+	}
+}
+
+// TestRunNoStepForCurrentStep verifies Run errors when the saga's current_step
+// is unknown.
+func TestRunNoStepForCurrentStep(t *testing.T) {
+	s := store.NewMemStore()
+	seedCtx(t, s, "tx-nostep")
+	_ = s.RunInTx(context.Background(), func(ts store.TxStore) error {
+		sg, _ := ts.LoadSagaState(context.Background(), "tx-nostep")
+		sg.CurrentStep = "nope"
+		sg.Version = sg.Version + 1
+		_ = ts.SaveSagaState(context.Background(), sg)
+		return nil
+	})
+	stub := partner.NewStub(partner.DefaultStubConfig())
+	c := &Clients{Policy: stub, Payment: stub, Kyt: stub, Mpc: stub, Blockchain: stub, Ledger: stub, Audit: stub}
+	ex := NewExecutor(s, c, testCfg())
+	err := ex.Run(runWithLog(context.Background()), "tx-nostep", "test")
+	if err == nil || !strings.Contains(err.Error(), "no step") {
+		t.Fatalf("expected no-step error, got %v", err)
+	}
+}
+
+// TestRunAdvanceToConfirmedMissingTxHash verifies advanceToConfirmed errors
+// when tx_hash is missing and the saga cannot complete.
+func TestRunAdvanceToConfirmedMissingTxHash(t *testing.T) {
+	s := store.NewMemStore()
+	seedCtx(t, s, "tx-nohash")
+	// Move saga to broadcasted without tx_hash.
+	_ = s.RunInTx(context.Background(), func(ts store.TxStore) error {
+		sg, _ := ts.LoadSagaState(context.Background(), "tx-nohash")
+		sg.State = statemachine.StateBroadcasted
+		sg.CurrentStep = statemachine.StepLedger
+		sg.Payload = map[string]any{}
+		sg.Version = sg.Version + 1
+		_ = ts.SaveSagaState(context.Background(), sg)
+		return nil
+	})
+	stub := partner.NewStub(partner.DefaultStubConfig())
+	c := &Clients{Policy: stub, Payment: stub, Kyt: stub, Mpc: stub, Blockchain: stub, Ledger: stub, Audit: stub}
+	ex := NewExecutor(s, c, testCfg())
+	_ = ex.Run(runWithLog(context.Background()), "tx-nohash", "test")
+	sg, _ := s.LoadSagaState(context.Background(), "tx-nohash")
+	if !sg.State.IsFailure() {
+		t.Fatalf("expected failure state (could not advance, ledger retries exhausted), got %s", sg.State)
+	}
+}
+
+// TestRunAdvanceToConfirmedPolled verifies the executor's inline
+// advanceToConfirmed path moves the saga to confirmed when the blockchain
+// gateway eventually reports the tx confirmed.  We seed the saga at
+// broadcasted (with tx_hash) and call advanceToConfirmed directly.
+func TestRunAdvanceToConfirmedPolled(t *testing.T) {
+	s := store.NewMemStore()
+	seedCtx(t, s, "tx-pollrun")
+	bc := &pollingFakeBlockchain{}
+	c := &Clients{Blockchain: bc}
+	ex := NewExecutor(s, c, testCfg())
+	_ = s.RunInTx(context.Background(), func(ts store.TxStore) error {
+		sg, _ := ts.LoadSagaState(context.Background(), "tx-pollrun")
+		sg.State = statemachine.StateBroadcasted
+		sg.CurrentStep = statemachine.StepLedger
+		sg.Payload = map[string]any{"tx_hash": "0xhpoll"}
+		sg.Version = sg.Version + 1
+		_ = ts.SaveSagaState(context.Background(), sg)
+		return nil
+	})
+	ctx := runWithLog(context.Background())
+	if err := ex.advanceToConfirmed(ctx, "tx-pollrun"); err != nil {
+		t.Fatalf("advanceToConfirmed: %v", err)
+	}
+	sg, _ := s.LoadSagaState(ctx, "tx-pollrun")
+	if sg.State != statemachine.StateConfirmed {
+		t.Fatalf("expected confirmed, got %s", sg.State)
+	}
+}
+
+// pollingFakeBlockchain returns Confirmed=false on the first Status call and
+// Confirmed=true afterwards, simulating an eventual on-chain confirmation.
+type pollingFakeBlockchain struct{ calls int }
+
+func (p *pollingFakeBlockchain) Broadcast(ctx context.Context, req partner.BroadcastRequest) (partner.BroadcastResponse, error) {
+	return partner.BroadcastResponse{TxHash: "0xhpoll", InMempool: true, Confirmed: false}, nil
+}
+func (p *pollingFakeBlockchain) Status(ctx context.Context, txHash string) (partner.BroadcastResponse, error) {
+	p.calls++
+	if p.calls > 1 {
+		return partner.BroadcastResponse{TxHash: txHash, InMempool: true, Confirmed: true}, nil
+	}
+	return partner.BroadcastResponse{TxHash: txHash, InMempool: true, Confirmed: false}, nil
 }

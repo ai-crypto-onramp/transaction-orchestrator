@@ -20,15 +20,40 @@ type PgStore struct {
 }
 
 // NewPgStore opens a pool against dsn, applies the embedded migrations, and
-// returns a ready PgStore.
+// returns a ready PgStore.  It retries the initial pool / migration step for
+// up to 30s to tolerate container start-up jitter.
 func NewPgStore(ctx context.Context, dsn string) (*PgStore, error) {
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return nil, fmt.Errorf("pgxpool.New: %w", err)
+	var pool *pgxpool.Pool
+	var err error
+	deadline := ctx
+	if _, ok := ctx.Deadline(); !ok {
+		c, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		deadline = c
 	}
-	if err := migrations.Up(ctx, pool); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("migrations.Up: %w", err)
+	for {
+		pool, err = pgxpool.New(deadline, dsn)
+		if err == nil {
+			err = migrations.Up(deadline, pool)
+		}
+		if err == nil {
+			break
+		}
+		if deadline.Err() != nil {
+			if pool != nil {
+				pool.Close()
+			}
+			return nil, fmt.Errorf("pgstore init: %w", err)
+		}
+		if pool != nil {
+			pool.Close()
+			pool = nil
+		}
+		select {
+		case <-time.After(500 * time.Millisecond):
+		case <-deadline.Done():
+			return nil, fmt.Errorf("pgstore init: %w", err)
+		}
 	}
 	return &PgStore{pool: pool}, nil
 }
@@ -274,6 +299,41 @@ func (m *pgTxStore) MarkOutboxPublished(ctx context.Context, eventIDs []string, 
 		}
 	}
 	return nil
+}
+
+// ClaimOutboxPending selects pending rows and locks them with SKIP LOCKED so
+// concurrent relay replicas do not double-publish.  Must be called inside a
+// Tx; the row lock is released on commit/rollback.
+func (m *pgTxStore) ClaimOutboxPending(ctx context.Context, limit int) ([]OutboxEvent, error) {
+	rows, err := m.tx.Query(ctx, `
+		SELECT event_id, tx_id, event_type, step, attempt, payload, created_at, published_at, status, dedup_key
+		FROM outbox_events WHERE status='pending'
+		ORDER BY created_at
+		LIMIT $1
+		FOR UPDATE SKIP LOCKED`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []OutboxEvent{}
+	for rows.Next() {
+		var e OutboxEvent
+		if err := scanEvent(rows.Scan, &e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Flip the claimed rows to 'inflight' so a crashed relay's rows can be
+	// reclaimed by a reaper.
+	for _, e := range out {
+		if _, err := m.tx.Exec(ctx, `UPDATE outbox_events SET status='inflight' WHERE event_id=$1`, e.EventID); err != nil {
+			return nil, mapPgErr(err)
+		}
+	}
+	return out, nil
 }
 
 // --- helpers -----------------------------------------------------------------

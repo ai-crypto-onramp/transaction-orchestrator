@@ -92,11 +92,19 @@ func (r *Relay) loop(ctx context.Context) {
 	}
 }
 
-// drainOnce polls one batch and publishes it.  Exposed for testing.
+// drainOnce claims one batch of pending events (atomically marking them
+// inflight), publishes each, then marks the published ones.  Claim + mark
+// run in separate transactions so the network Publish call does not hold the
+// row lock; a relay crash between publish and mark-published leaves the row
+// inflight for a reaper to re-queue (at-least-once).
 func (r *Relay) drainOnce(ctx context.Context) error {
-	events, err := r.Store.ListOutboxPending(ctx, r.BatchSize)
-	if err != nil {
-		return fmt.Errorf("list pending: %w", err)
+	var events []store.OutboxEvent
+	if err := r.Store.RunInTx(ctx, func(ts store.TxStore) error {
+		var err error
+		events, err = ts.ClaimOutboxPending(ctx, r.BatchSize)
+		return err
+	}); err != nil {
+		return fmt.Errorf("claim pending: %w", err)
 	}
 	if len(events) == 0 {
 		return nil
@@ -105,8 +113,6 @@ func (r *Relay) drainOnce(ctx context.Context) error {
 	for _, e := range events {
 		subject := r.SubjectFn(e.EventType)
 		if err := r.Publisher.Publish(ctx, subject, e); err != nil {
-			// Stop on first publish error; already-published rows in this
-			// batch are still marked, the rest will be retried next tick.
 			break
 		}
 		publishedIDs = append(publishedIDs, e.EventID)

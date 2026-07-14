@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package blockchain.v1;
+
+option go_package = "github.com/ai-crypto-onramp/transaction-orchestrator/internal/pb/blockchain;pb";
+
+// BlockchainGateway broadcasts a signed transaction and reports its
+// on-chain status.
+service BlockchainGateway {
+  rpc Broadcast(BroadcastRequest) returns (BroadcastResponse);
+  rpc Status(StatusRequest) returns (BroadcastResponse);
+}
+
+message BroadcastRequest {
+  string tx_id         = 1;
+  string signed_tx_hex = 2;
+}
+
+message StatusRequest {
+  string tx_hash = 1;
+}
+
+message BroadcastResponse {
+  string tx_hash   = 1;
+  bool   in_mempool = 2;
+  bool   confirmed  = 3;
+}

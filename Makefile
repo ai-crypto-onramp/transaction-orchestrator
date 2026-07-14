@@ -1,11 +1,12 @@
 .PHONY: build test run lint cover docker-build docker-run clean \
-	migrate-up migrate-down migrate-new
+	migrate-up migrate-down migrate-new proto
 
 build:
 	go build -o bin/transaction-orchestrator ./cmd/orchestrator
 
 test:
-	go test ./internal/... -race -coverprofile=coverage.out -coverpkg=./internal/...
+	@coverpkg=$$(go list ./internal/... | grep -v '/internal/pb/' | tr '\n' ','); \
+	go test ./internal/... -race -coverprofile=coverage.out -coverpkg=$${coverpkg%,}
 
 run:
 	go run ./cmd/orchestrator
@@ -36,3 +37,14 @@ docker-run:
 
 clean:
 	rm -rf bin/ coverage.out
+
+# proto regenerates the gRPC bindings under internal/pb from proto/*.proto.
+# Requires protoc, protoc-gen-go, and protoc-gen-go-grpc on $PATH.
+proto:
+	@for svc in policy payment kyt mpc blockchain ledger; do \
+		protoc -I proto \
+			--go_out=internal/pb/$$svc --go_opt=paths=source_relative \
+			--go-grpc_out=internal/pb/$$svc --go-grpc_opt=paths=source_relative \
+			proto/$$svc.proto; \
+	done
+	@echo "regenerated internal/pb/{policy,payment,kyt,mpc,blockchain,ledger}"

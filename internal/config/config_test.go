@@ -88,3 +88,54 @@ func TestStepTimeoutOverrides(t *testing.T) {
 		}
 	}
 }
+
+func TestStepTimeoutEnvOverrides(t *testing.T) {
+	setEnvs(t, requiredAll())
+	t.Setenv("STEP_TIMEOUT_POLICY_SECONDS", "11")
+	t.Setenv("STEP_TIMEOUT_PAYMENT_SECONDS", "22")
+	t.Setenv("STEP_TIMEOUT_KYT_SECONDS", "33")
+	t.Setenv("STEP_TIMEOUT_MPC_SECONDS", "44")
+	t.Setenv("STEP_TIMEOUT_BROADCAST_SECONDS", "55")
+	t.Setenv("STEP_TIMEOUT_LEDGER_SECONDS", "66")
+	t.Setenv("STEP_TIMEOUT_SECONDS", "77")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cases := map[string]time.Duration{
+		"policy": 11 * time.Second, "payment": 22 * time.Second,
+		"kyt": 33 * time.Second, "mpc_sign": 44 * time.Second,
+		"broadcast": 55 * time.Second, "ledger": 66 * time.Second,
+		"unknown": 77 * time.Second,
+	}
+	for step, want := range cases {
+		if got := c.StepTimeout(step); got != want {
+			t.Fatalf("StepTimeout(%s) = %v, want %v", step, got, want)
+		}
+	}
+}
+
+func TestGetenvInvalidInt(t *testing.T) {
+	setEnvs(t, requiredAll())
+	t.Setenv("MAX_RETRIES", "not-a-number")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.MaxRetries != 5 {
+		t.Fatalf("expected fallback default 5, got %d", c.MaxRetries)
+	}
+}
+
+func TestLogLevelDefaultAndOverride(t *testing.T) {
+	setEnvs(t, requiredAll())
+	c, _ := Load()
+	if c.LogLevel != "info" {
+		t.Fatalf("expected info default, got %s", c.LogLevel)
+	}
+	t.Setenv("LOG_LEVEL", "DEBUG")
+	c, _ = Load()
+	if c.LogLevel != "debug" {
+		t.Fatalf("expected debug, got %s", c.LogLevel)
+	}
+}

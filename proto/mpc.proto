@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package mpc.v1;
+
+option go_package = "github.com/ai-crypto-onramp/transaction-orchestrator/internal/pb/mpc;pb";
+
+// MpcSigningService threshold-signs a transaction payload.
+service MpcSigningService {
+  rpc Sign(MpcSignRequest) returns (MpcSignResponse);
+}
+
+message MpcSignRequest {
+  string tx_id         = 1;
+  string unsigned_tx_hex = 2;
+}
+
+message MpcSignResponse {
+  string signed_tx_hex = 1;
+}

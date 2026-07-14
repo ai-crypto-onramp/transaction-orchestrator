@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package payment.v1;
+
+option go_package = "github.com/ai-crypto-onramp/transaction-orchestrator/internal/pb/payment;pb";
+
+// PaymentOrchestration authorizes and captures fiat for a purchase.
+service PaymentOrchestration {
+  rpc Authorize(PaymentAuthorizeRequest) returns (PaymentAuthorizeResponse);
+  rpc Capture(PaymentCaptureRequest) returns (PaymentCaptureResponse);
+  rpc VoidAuthorization(PaymentVoidRequest) returns (PaymentVoidResponse);
+  rpc Refund(PaymentRefundRequest) returns (PaymentRefundResponse);
+}
+
+message PaymentAuthorizeRequest {
+  string tx_id    = 1;
+  string user_id  = 2;
+  string quote_id = 3;
+  string amount   = 4;
+  string asset    = 5;
+  string rail     = 6;
+}
+
+message PaymentAuthorizeResponse {
+  string auth_id = 1;
+}
+
+message PaymentCaptureRequest {
+  string tx_id   = 1;
+  string auth_id = 2;
+  string amount  = 3;
+  string asset   = 4;
+}
+
+message PaymentCaptureResponse {
+  string capture_id = 1;
+}
+
+message PaymentVoidRequest {
+  string tx_id   = 1;
+  string auth_id = 2;
+}
+
+message PaymentVoidResponse {}
+
+message PaymentRefundRequest {
+  string tx_id     = 1;
+  string capture_id = 2;
+  string amount     = 3;
+  string asset      = 4;
+}
+
+message PaymentRefundResponse {}

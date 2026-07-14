@@ -170,3 +170,83 @@ func TestIdempotencyAndDedupKeys(t *testing.T) {
 		t.Fatalf("unexpected dedup key: %s", dk)
 	}
 }
+
+func TestMemStoreCloseIsNoop(t *testing.T) {
+	s := NewMemStore()
+	s.Close()
+	// Close is idempotent.
+	s.Close()
+}
+
+func TestEncodeJSONNilAndEmpty(t *testing.T) {
+	if got := EncodeJSON(nil); string(got) != "{}" {
+		t.Fatalf("expected {} for nil, got %s", got)
+	}
+	if got := EncodeJSON(map[string]any{"k": "v"}); string(got) != `{"k":"v"}` {
+		t.Fatalf("unexpected json: %s", got)
+	}
+}
+
+func TestMemStoreListOutboxPendingLimit(t *testing.T) {
+	s := NewMemStore()
+	ctx := context.Background()
+	_ = s.RunInTx(ctx, func(ts TxStore) error {
+		var evts []OutboxEvent
+		for i := 0; i < 5; i++ {
+			evts = append(evts, OutboxEvent{
+				EventID: NewEventID(), TxID: "t", EventType: "e",
+				Status: OutboxPending, DedupKey: DedupKey("t", "e", "", i),
+				CreatedAt: time.Now().UTC(),
+			})
+		}
+		return ts.AppendOutbox(ctx, evts)
+	})
+	pending, err := s.ListOutboxPending(ctx, 3)
+	if err != nil {
+		t.Fatalf("ListOutboxPending: %v", err)
+	}
+	if len(pending) != 3 {
+		t.Fatalf("expected 3 pending (limit), got %d", len(pending))
+	}
+}
+
+func TestMemStoreListInflightEmptyAndNonTerminal(t *testing.T) {
+	s := NewMemStore()
+	ctx := context.Background()
+	inflight, err := s.ListInflightSagaIDs(ctx)
+	if err != nil || len(inflight) != 0 {
+		t.Fatalf("expected 0 inflight, got %d err=%v", len(inflight), err)
+	}
+	seedTx(t, s, "if-1")
+	inflight, _ = s.ListInflightSagaIDs(ctx)
+	if len(inflight) != 1 {
+		t.Fatalf("expected 1 inflight, got %d", len(inflight))
+	}
+}
+
+func TestMemStoreBeginTxCommitRollback(t *testing.T) {
+	s := NewMemStore()
+	ctx := context.Background()
+	tx, err := s.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	tx2, _ := s.BeginTx(ctx)
+	if err := tx2.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+}
+
+func TestMemStoreWithinReturnsTxStore(t *testing.T) {
+	s := NewMemStore()
+	ctx := context.Background()
+	tx, _ := s.BeginTx(ctx)
+	ts := s.Within(tx)
+	if ts == nil {
+		t.Fatal("Within returned nil")
+	}
+	_ = tx.Commit(ctx)
+}

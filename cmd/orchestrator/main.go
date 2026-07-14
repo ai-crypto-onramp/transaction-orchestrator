@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,9 +18,16 @@ import (
 
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/api"
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/config"
+	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/grpcclient"
+	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/lease"
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/logging"
+	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/outbox"
+	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/partner"
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/quotelocker"
+	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/saga"
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/store"
+	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/worker"
+	"google.golang.org/grpc"
 )
 
 func main() {
@@ -56,6 +64,54 @@ func run() error {
 	}
 
 	svc := api.NewService(s, quotelocker.NewNoop())
+
+	// Build the saga partner clients.  When a *_URL is set to "stub://" (or
+	// empty) we use the in-memory Stub so the server can boot without real
+	// partner services.  Otherwise we dial the gRPC endpoint.
+	stub := partner.NewStub(partner.DefaultStubConfig())
+	clients := &saga.Clients{Policy: stub, Payment: stub, Kyt: stub, Mpc: stub, Blockchain: stub, Ledger: stub, Audit: stub}
+	grpcConns := dialPartners(ctx, cfg, clients, log)
+	defer closeConns(grpcConns)
+
+	// Build the executor + lease manager + worker pool.
+	execCfg := saga.Config{
+		MaxRetries:  cfg.MaxRetries,
+		BaseBackoff: time.Duration(cfg.RetryBaseBackoffMS) * time.Millisecond,
+		MaxBackoff:  time.Duration(cfg.RetryMaxBackoffMS) * time.Millisecond,
+		StepTimeout: cfg.StepTimeout,
+	}
+	exec := saga.NewExecutor(s, clients, execCfg)
+	var leaseMgr saga.LeaseManager = saga.NoopLease{}
+	if cfg.RedisURL != "" {
+		rl, err := lease.NewRedisLease(cfg.RedisURL, cfg.LeaseTTLOffset)
+		if err == nil {
+			leaseMgr = rl
+			defer rl.Close()
+		} else {
+			log.Warn("redis lease init failed; using no-op lease", "err", err)
+		}
+	}
+	exec.Lease = leaseMgr
+
+	dispatcher := worker.New(s, exec, cfg.WorkerConcurrency, "")
+	if err := dispatcher.Recover(ctx); err != nil {
+		log.Warn("crash recovery scan failed", "err", err)
+	}
+	dispatcher.Start(ctx)
+	defer dispatcher.Stop()
+	svc.Control = &worker.Control{Dispatcher: dispatcher, Executor: exec}
+
+	// Start the outbox relay.
+	pub, err := outbox.NewPublisher(cfg.EventBusURL)
+	if err != nil {
+		log.Warn("event-bus publisher init failed; outbox relay disabled", "err", err)
+	} else {
+		defer pub.Close()
+		relay := outbox.NewRelay(s, pub, cfg.OutboxBatchSize, time.Duration(cfg.OutboxPollIntervalMS)*time.Millisecond)
+		relay.Start(ctx)
+		defer relay.Stop()
+	}
+
 	handler := api.Mux(svc)
 
 	addr := ":" + cfg.Port
@@ -100,4 +156,90 @@ func toString(a []any) string {
 		s += fmt.Sprintf("%v", v)
 	}
 	return s
+}
+
+// grpcConn bundles a *grpc.ClientConn with its name for deferred close.
+type grpcConn struct {
+	cc   *grpc.ClientConn
+	name string
+}
+
+func closeConns(conns []*grpcConn) {
+	for _, c := range conns {
+		_ = c.cc.Close()
+	}
+}
+
+// dialPartners dials every partner service whose *_URL is set to a non-stub
+// endpoint and replaces the corresponding stub in clients with the real gRPC
+// client.  Dial failures fall back to the stub and log a warning.
+func dialPartners(ctx context.Context, cfg config.Config, clients *saga.Clients, log *slog.Logger) []*grpcConn {
+	var conns []*grpcConn
+	dials := []struct {
+		name string
+		url  string
+	}{
+		{"policy", cfg.PolicyURL},
+		{"payment", cfg.PaymentURL},
+		{"kyt", cfg.KytURL},
+		{"mpc", cfg.MpcURL},
+		{"blockchain", cfg.BlockchainURL},
+		{"ledger", cfg.LedgerURL},
+	}
+	for _, d := range dials {
+		if d.url == "" || d.url == "stub://" {
+			continue
+		}
+		switch d.name {
+		case "policy":
+			c, cc, err := grpcclient.NewPolicy(ctx, d.url)
+			if err != nil {
+				log.Warn("policy dial failed; using stub", "err", err)
+				continue
+			}
+			clients.Policy = c
+			conns = append(conns, &grpcConn{cc, d.name})
+		case "payment":
+			c, cc, err := grpcclient.NewPayment(ctx, d.url)
+			if err != nil {
+				log.Warn("payment dial failed; using stub", "err", err)
+				continue
+			}
+			clients.Payment = c
+			conns = append(conns, &grpcConn{cc, d.name})
+		case "kyt":
+			c, cc, err := grpcclient.NewKyt(ctx, d.url)
+			if err != nil {
+				log.Warn("kyt dial failed; using stub", "err", err)
+				continue
+			}
+			clients.Kyt = c
+			conns = append(conns, &grpcConn{cc, d.name})
+		case "mpc":
+			c, cc, err := grpcclient.NewMpc(ctx, d.url)
+			if err != nil {
+				log.Warn("mpc dial failed; using stub", "err", err)
+				continue
+			}
+			clients.Mpc = c
+			conns = append(conns, &grpcConn{cc, d.name})
+		case "blockchain":
+			c, cc, err := grpcclient.NewBlockchain(ctx, d.url)
+			if err != nil {
+				log.Warn("blockchain dial failed; using stub", "err", err)
+				continue
+			}
+			clients.Blockchain = c
+			conns = append(conns, &grpcConn{cc, d.name})
+		case "ledger":
+			c, cc, err := grpcclient.NewLedger(ctx, d.url)
+			if err != nil {
+				log.Warn("ledger dial failed; using stub", "err", err)
+				continue
+			}
+			clients.Ledger = c
+			conns = append(conns, &grpcConn{cc, d.name})
+		}
+	}
+	return conns
 }

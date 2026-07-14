@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package policy.v1;
+
+option go_package = "github.com/ai-crypto-onramp/transaction-orchestrator/internal/pb/policy;pb";
+
+// PolicyRiskEngine evaluates a purchase request against risk/compliance
+// policy before any funds move.
+service PolicyRiskEngine {
+  // Evaluate returns an allow/deny decision for the given purchase request.
+  rpc Evaluate(PolicyRequest) returns (PolicyResponse);
+}
+
+message PolicyRequest {
+  string tx_id        = 1;
+  string user_id      = 2;
+  string quote_id     = 3;
+  string amount       = 4;
+  string asset        = 5;
+  string rail         = 6;
+  string dest_address = 7;
+}
+
+message PolicyResponse {
+  string decision = 1; // "allow" | "deny"
+  string reason   = 2;
+}

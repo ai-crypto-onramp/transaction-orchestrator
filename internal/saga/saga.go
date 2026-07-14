@@ -460,6 +460,12 @@ func (e *Executor) persistTerminal(ctx context.Context, step Step, sc *SagaConte
 	})
 }
 
+// CompensateCascade is the exported wrapper around compensateCascade used by
+// the worker.Control manual-compensation flow.
+func (e *Executor) CompensateCascade(ctx context.Context, txID, owner string, failedStep Step) error {
+	return e.compensateCascade(ctx, txID, owner, failedStep)
+}
+
 // compensateCascade runs Compensate on every completed step in reverse order,
 // starting from the failed step.  The saga ends in failed_compensated (all
 // compensations ok) or failed (any compensation failed).

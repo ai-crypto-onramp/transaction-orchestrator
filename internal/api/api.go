@@ -32,6 +32,17 @@ import (
 type Service struct {
 	Store  store.Store
 	Locker quotelocker.Locker
+	// Control, if set, handles retry/compensate operations.  When nil the
+	// retry/compensate endpoints return 202 with a status note (Stage 8 hook).
+	Control Control
+}
+
+// Control is the saga control plane used by the retry/compensate endpoints.
+type Control interface {
+	// Retry force-retries the named step for txID.  Idempotent.
+	Retry(ctx context.Context, txID string, step statemachine.Step) error
+	// Compensate triggers the compensation cascade for txID.
+	Compensate(ctx context.Context, txID string) error
 }
 
 // NewService returns a Service.
@@ -226,14 +237,46 @@ func (s *Service) handleSteps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"steps": toStepResponses(steps)})
 }
 
-// handleRetry / handleCompensate are Stage 8 hooks. They proxy to the worker
-// via the saga control plane; until then they return 202 with a status note so
-// the API surface is stable.
+// handleRetry force-retries a failed step.  When Control is nil it returns 202
+// with a status note (Stage 8 hook for backward compatibility).
 func (s *Service) handleRetry(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusAccepted, map[string]any{"status": "retry-accepted"})
+	ctx := r.Context()
+	txID := r.PathValue("id")
+	if s.Control == nil {
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "retry-accepted"})
+		return
+	}
+	var body struct {
+		Step string `json:"step"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	step := statemachine.Step(body.Step)
+	if step == "" {
+		sg, err := s.Store.LoadSagaState(ctx, txID)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "missing --step or current saga state")
+			return
+		}
+		step = sg.CurrentStep
+	}
+	if err := s.Control.Retry(ctx, txID, step); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "retry-accepted", "step": string(step)})
 }
 
 func (s *Service) handleCompensate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	txID := r.PathValue("id")
+	if s.Control == nil {
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "compensate-accepted"})
+		return
+	}
+	if err := s.Control.Compensate(ctx, txID); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "compensate-accepted"})
 }
 

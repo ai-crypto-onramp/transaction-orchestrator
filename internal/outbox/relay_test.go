@@ -82,9 +82,20 @@ func TestNewPublisherSelectsByScheme(t *testing.T) {
 	}
 	_ = p.Close()
 
-	if _, err := NewPublisher("kafka://broker:9092"); err == nil {
+	if _, err := NewPublisher("foobar://broker:9092"); err == nil {
 		t.Fatal("expected error for unknown scheme")
 	}
+
+	// kafka:// should parse without error (no connection is made until
+	// Publish).
+	kp, err := NewPublisher("kafka://broker:9092,broker2:9092?topic=tx")
+	if err != nil {
+		t.Fatalf("kafka: %v", err)
+	}
+	if _, ok := kp.(*KafkaPublisher); !ok {
+		t.Fatalf("expected KafkaPublisher, got %T", kp)
+	}
+	_ = kp.Close()
 }
 
 // TestRelaiStopsOnPublishError verifies the relay stops draining on error but
@@ -135,6 +146,33 @@ func (c *countingPublisher) Publish(ctx context.Context, subject string, event s
 	return nil
 }
 func (c *countingPublisher) Close() error { return nil }
+
+// TestRelayCustomSubjectFn verifies the relay honors a custom SubjectFn.
+func TestRelayCustomSubjectFn(t *testing.T) {
+	s := store.NewMemStore()
+	seedOutbox(t, s, 1)
+	pub := NewInMemoryPublisher()
+	relay := NewRelay(s, pub, 10, time.Millisecond)
+	relay.SubjectFn = func(eventType string) string { return "custom." + eventType }
+	ctx := logging.WithLogger(context.Background(), logging.New("debug"))
+	relay.Start(ctx)
+	defer relay.Stop()
+	waitFor(t, func() bool { return pub.Len() == 1 }, time.Second)
+	if pub.Subjects[0] != "custom.step.policy.succeeded" {
+		t.Fatalf("expected custom subject, got %q", pub.Subjects[0])
+	}
+}
+
+// TestNewRelayDefaults verifies NewRelay fills in defaults.
+func TestNewRelayDefaults(t *testing.T) {
+	r := NewRelay(store.NewMemStore(), NewInMemoryPublisher(), 0, 0)
+	if r.BatchSize != 100 || r.Interval != 100*time.Millisecond || r.SubjectFn == nil {
+		t.Fatalf("unexpected defaults: batch=%d interval=%v subjectFn=nil=%v", r.BatchSize, r.Interval, r.SubjectFn == nil)
+	}
+	if got := r.SubjectFn("x"); got != "transactions.x" {
+		t.Fatalf("default SubjectFn: %q", got)
+	}
+}
 
 func waitFor(t *testing.T, cond func() bool, timeout time.Duration) {
 	t.Helper()

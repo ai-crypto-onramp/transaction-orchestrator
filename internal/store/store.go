@@ -38,6 +38,7 @@ type OutboxStatus string
 
 const (
 	OutboxPending   OutboxStatus = "pending"
+	OutboxInflight  OutboxStatus = "inflight"
 	OutboxPublished OutboxStatus = "published"
 )
 
@@ -132,6 +133,10 @@ type TxStore interface {
 	LoadStep(ctx context.Context, txID string, step statemachine.Step, attempt int) (StepRow, error)
 	AppendOutbox(ctx context.Context, events []OutboxEvent) error
 	MarkOutboxPublished(ctx context.Context, eventIDs []string, at time.Time) error
+	// ClaimOutboxPending selects up to limit pending outbox events and locks
+	// them for update (SKIP LOCKED on Postgres) so concurrent relays do not
+	// double-publish.  Must be called inside a Tx.
+	ClaimOutboxPending(ctx context.Context, limit int) ([]OutboxEvent, error)
 }
 
 // ErrNotFound is returned by read methods when the row does not exist.
@@ -395,4 +400,21 @@ func (m *memTxStore) MarkOutboxPublished(ctx context.Context, eventIDs []string,
 		}
 	}
 	return nil
+}
+
+func (m *memTxStore) ClaimOutboxPending(ctx context.Context, limit int) ([]OutboxEvent, error) {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	out := make([]OutboxEvent, 0, limit)
+	for i, e := range m.s.outbox {
+		if e.Status == OutboxPending {
+			e.Status = OutboxInflight
+			m.s.outbox[i] = e
+			out = append(out, e)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
 }

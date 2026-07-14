@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package ledger.v1;
+
+option go_package = "github.com/ai-crypto-onramp/transaction-orchestrator/internal/pb/ledger;pb";
+
+// LedgerAccounting posts a double-entry journal record for a completed
+// purchase.
+service LedgerAccounting {
+  rpc PostDoubleEntry(LedgerPostRequest) returns (LedgerPostResponse);
+}
+
+message LedgerPostRequest {
+  string tx_id   = 1;
+  string user_id = 2;
+  string amount  = 3;
+  string asset   = 4;
+  string rail     = 5;
+}
+
+message LedgerPostResponse {
+  string journal_id = 1;
+}
