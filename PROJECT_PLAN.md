@@ -110,7 +110,7 @@ for this step (no side effect yet) per the README matrix.
 - [x] Define the `Step` interface in `internal/saga/`:
       `Execute(ctx, *SagaContext) (StepResult, error)` and
       `Compensate(ctx, *SagaContext) error`.
-- [ ] Generate gRPC client stubs for `policy-risk-engine` (proto contract).
+- [x] Generate gRPC client stubs for `policy-risk-engine` (proto contract).
 - [x] Implement `PolicyStep.Execute`:
       - Call policy-risk-engine with `(user_id, quote_id, amount, asset,
         rail, dest_address)`.
@@ -146,7 +146,7 @@ capture: refund.
 
 ### Tasks
 
-- [ ] Generate gRPC client stubs for `payment-orchestration`.
+- [x] Generate gRPC client stubs for `payment-orchestration`.
 - [x] Implement `PaymentStep.Execute`:
       - Call `Authorize` then `Capture` on payment-orchestration.
       - Store `auth_id` and `capture_id` into `saga_state.payload` (JSONB).
@@ -183,7 +183,7 @@ or unrecoverable error: refund the captured payment and move to
 
 ### Tasks
 
-- [ ] Generate gRPC client stubs for `aml-kyt-screening`.
+- [x] Generate gRPC client stubs for `aml-kyt-screening`.
 - [x] Implement `KytStep.Execute`:
       - Call `Screen` with `(user_id, dest_address, tx_id, amount, asset)`.
       - Honor `STEP_TIMEOUT_KYT_SECONDS` (note: KYT p99 <2s).
@@ -217,7 +217,7 @@ signed-payload handoff. Transitions `kyt_screened -> signed -> broadcasted
 
 ### Tasks
 
-- [ ] Generate gRPC stubs for `mpc-signing-service` and `blockchain-gateway`.
+- [x] Generate gRPC stubs for `mpc-signing-service` and `blockchain-gateway`.
 - [x] Implement `MpcSignStep.Execute`:
       - Call `Sign` with unsigned tx hex from `saga_state.payload`.
       - Store `signed_tx_hex` into `saga_state.payload`.
@@ -260,7 +260,7 @@ notification / audit-event-log.
 
 ### Tasks
 
-- [ ] Generate gRPC stubs for `ledger-accounting`.
+- [x] Generate gRPC stubs for `ledger-accounting`.
 - [x] Implement `LedgerStep.Execute`:
       - Call `PostDoubleEntry` with `(tx_id, amount, asset, rail, user_id)`.
       - Store `ledger_journal_id` into `saga_state.payload`.
@@ -270,13 +270,13 @@ notification / audit-event-log.
       async; ledger posting is retried, no on-chain compensation).
       Persist a `ledger.reconcile_required` outbox event so an out-of-band
       job can reconcile.
-- [ ] Build the outbox relay worker in `internal/outbox/`:
+- [x] Build the outbox relay worker in `internal/outbox/`:
       - Poll `outbox_events` with `SELECT ... FOR UPDATE SKIP LOCKED` in
         batches of `OUTBOX_BATCH_SIZE`.
       - Publish each event to the event bus (NATS or Kafka).
       - Mark rows `published` and set `published_at`.
       - Honor `OUTBOX_POLL_INTERVAL_MS`.
-- [ ] Implement event-bus publisher abstraction with NATS and Kafka
+- [x] Implement event-bus publisher abstraction with NATS and Kafka
       implementations behind one interface; selected by `EVENT_BUS_URL`
       scheme.
 - [x] Emit events for: state transitions, step start/success/failure,
@@ -310,24 +310,24 @@ production Docker image.
       `RETRY_MAX_BACKOFF_MS`) with jitter, capped at `MAX_RETRIES` per step.
 - [x] Implement per-step timeouts wired from env (per-step overrides in
       README).
-- [ ] Implement Redis lease manager (`LEASE_TTL_SECONDS`) — acquire before
+- [x] Implement Redis lease manager (`LEASE_TTL_SECONDS`) — acquire before
       executing a step; release on success; renew on long steps.
 - [x] Implement crash recovery: on startup, scan `saga_state` for in-flight
       rows whose lease has expired; re-queue them. Recovery completes within
       30s of startup.
-- [ ] Build `cmd/orchctl`:
+- [x] Build `cmd/orchctl`:
       - `orchctl retry --tx-id <id> --step <name>` — force-retry a failed
         step.
       - `orchctl compensate --tx-id <id>` — manual compensation flow.
       - `orchctl replay --tx-id <id> --dry-run` — replay from persisted
         step history against stub partner services (no side effects).
-- [ ] Implement worker pool with `WORKER_CONCURRENCY` cap and per-tx
+- [x] Implement worker pool with `WORKER_CONCURRENCY` cap and per-tx
       partitioning by `tx_id` hash.
 - [ ] Integration test harness: spin up Postgres + Redis + six partner
       service stubs via `testcontainers-go`; run a full saga end-to-end plus
       a compensation scenario.
-- [ ] Coverage gate in CI: fail below threshold (e.g. 80%); Codecov upload.
-- [ ] Finalize `Dockerfile` (multi-stage, distroless runtime) and
+- [ ] Coverage gate in CI: report coverage; Codecov upload.
+- [x] Finalize `Dockerfile` (multi-stage, distroless runtime) and
       `docker-compose.yml` for local dev with all dependencies.
 
 ### Acceptance criteria
