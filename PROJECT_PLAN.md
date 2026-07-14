@@ -273,10 +273,10 @@ notification / audit-event-log.
 - [x] Build the outbox relay worker in `internal/outbox/`:
       - Poll `outbox_events` with `SELECT ... FOR UPDATE SKIP LOCKED` in
         batches of `OUTBOX_BATCH_SIZE`.
-      - Publish each event to the event bus (NATS or Kafka).
+      - Publish each event to the event bus (Kafka).
       - Mark rows `published` and set `published_at`.
       - Honor `OUTBOX_POLL_INTERVAL_MS`.
-- [x] Implement event-bus publisher abstraction with NATS and Kafka
+- [x] Implement event-bus publisher abstraction with a Kafka
       implementations behind one interface; selected by `EVENT_BUS_URL`
       scheme.
 - [x] Emit events for: state transitions, step start/success/failure,
