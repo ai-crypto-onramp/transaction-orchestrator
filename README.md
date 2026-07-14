@@ -206,7 +206,7 @@ Responsibilities:
   transaction** as the `saga_state`/`transaction_steps` update, guaranteeing
   atomic state + event persistence (no lost events on crash).
 - A dedicated relay worker polls `outbox_events` (status = `pending`) and
-  publishes to the event bus (e.g. NATS/Kafka), then marks rows `published`.
+  publishes to the event bus (Kafka), then marks rows `published`.
 - At-least-once delivery; consumers dedup on the outbox dedup key
   `(tx_id, event_type, step, attempt)`.
 - Relay is horizontally scalable with row-level locking (`SELECT ... FOR UPDATE
@@ -224,7 +224,7 @@ Responsibilities:
 - **blockchain-gateway** (gRPC)
 - **ledger-accounting** (gRPC)
 - **audit-event-log** (async via event bus)
-- **Event bus** (NATS or Kafka) — outbox relay target.
+- **Event bus** (Kafka) — outbox relay target.
 
 ## Configuration
 
@@ -250,7 +250,7 @@ Responsibilities:
 | `MAX_RETRIES` | Max retry attempts per step. | `5` |
 | `RETRY_BASE_BACKOFF_MS` | Initial backoff for step retries. | `200` |
 | `RETRY_MAX_BACKOFF_MS` | Cap for exponential backoff. | `10000` |
-| `EVENT_BUS_URL` | Event bus (NATS/Kafka) broker URL for outbox relay. | required |
+| `EVENT_BUS_URL` | Event bus (Kafka) broker URL for outbox relay (`kafka://host:9092`). | required |
 | `OUTBOX_POLL_INTERVAL_MS` | Outbox relay poll interval. | `100` |
 | `OUTBOX_BATCH_SIZE` | Max events published per relay poll. | `100` |
 | `WORKER_CONCURRENCY` | Max concurrent sagas per instance. | `256` |

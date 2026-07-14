@@ -23,13 +23,13 @@ func requiredAll() map[string]string {
 		"MPC_URL":       "localhost:7004",
 		"BLOCKCHAIN_URL": "localhost:7005",
 		"LEDGER_URL":    "localhost:7006",
-		"EVENT_BUS_URL": "nats://localhost:4222",
+		"EVENT_BUS_URL": "kafka://localhost:9092",
 	}
 }
 
 func requiredMinimal() map[string]string {
 	return map[string]string{
-		"EVENT_BUS_URL": "nats://localhost:4222",
+		"EVENT_BUS_URL": "kafka://localhost:9092",
 	}
 }
 

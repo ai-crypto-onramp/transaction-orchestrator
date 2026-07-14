@@ -23,17 +23,24 @@ services:
       timeout: 3s
       retries: 10
 
-  nats:
-    image: nats:2-alpine
-    command: ["-js"]
+  kafka:
+    image: bitnami/kafka:3.7
+    environment:
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "9092:9092"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
       interval: 5s
-      timeout: 3s
-      retries: 10
+      timeout: 5s
+      retries: 15
 
   # Stub partner services: tiny gRPC servers are provided by the test
   # harness; for local dev set POLICY_URL=stub:// etc. to use in-process stubs.
@@ -44,12 +51,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      nats:
+      kafka:
         condition: service_healthy
     environment:
       DB_URL: "postgres://u:p@postgres:5432/to?sslmode=disable"
       REDIS_URL: "redis:6379"
-      EVENT_BUS_URL: "nats://nats:4222"
+      EVENT_BUS_URL: "kafka://kafka:9092"
       POLICY_URL: "stub://"
       PAYMENT_URL: "stub://"
       KYT_URL: "stub://"

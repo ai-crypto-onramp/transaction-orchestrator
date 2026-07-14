@@ -7,7 +7,7 @@
 // poll concurrently without double-publishing.
 //
 // Two publisher implementations are provided:
-//   - NATSPublisher (github.com/nats-io/nats.go)
+//   - KafkaPublisher (github.com/segmentio/kafka-go)
 //   - InMemoryPublisher (for unit tests)
 package outbox
 
