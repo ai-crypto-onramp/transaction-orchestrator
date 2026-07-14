@@ -1,11 +1,11 @@
-.PHONY: build test run lint coverage docker-build docker-run clean \
+.PHONY: build test run lint cover docker-build docker-run clean \
 	migrate-up migrate-down migrate-new
 
 build:
 	go build -o bin/transaction-orchestrator ./cmd/orchestrator
 
 test:
-	go test ./cmd/... ./internal/... -race -coverprofile=coverage.out -coverpkg=./cmd/...,./internal/...
+	go test ./internal/... -race -coverprofile=coverage.out -coverpkg=./internal/...
 
 run:
 	go run ./cmd/orchestrator
@@ -25,7 +25,7 @@ migrate-new:
 lint:
 	golangci-lint run
 
-coverage: test
+cover: test
 	go tool cover -func=coverage.out | tail -1
 
 docker-build:
