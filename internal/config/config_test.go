@@ -74,12 +74,12 @@ func TestStepTimeoutOverrides(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	cases := map[string]time.Duration{
-		"policy":    5 * time.Second,
-		"payment":   30 * time.Second,
-		"kyt":       15 * time.Second,
-		"mpc_sign":  20 * time.Second,
-		"broadcast": 30 * time.Second,
-		"ledger":    10 * time.Second,
+		"POLICY":    5 * time.Second,
+		"PAYMENT":   30 * time.Second,
+		"KYT":       15 * time.Second,
+		"MPC_SIGN":  20 * time.Second,
+		"BROADCAST": 30 * time.Second,
+		"LEDGER":    10 * time.Second,
 		"unknown":   30 * time.Second,
 	}
 	for step, want := range cases {
@@ -103,9 +103,9 @@ func TestStepTimeoutEnvOverrides(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	cases := map[string]time.Duration{
-		"policy": 11 * time.Second, "payment": 22 * time.Second,
-		"kyt": 33 * time.Second, "mpc_sign": 44 * time.Second,
-		"broadcast": 55 * time.Second, "ledger": 66 * time.Second,
+		"POLICY": 11 * time.Second, "PAYMENT": 22 * time.Second,
+		"KYT": 33 * time.Second, "MPC_SIGN": 44 * time.Second,
+		"BROADCAST": 55 * time.Second, "LEDGER": 66 * time.Second,
 		"unknown": 77 * time.Second,
 	}
 	for step, want := range cases {

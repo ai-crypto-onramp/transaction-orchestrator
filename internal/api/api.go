@@ -146,7 +146,10 @@ func (s *Service) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 
-	txID := uuid.NewString()
+	txID := func() string {
+		id, _ := uuid.NewV7()
+		return id.String()
+	}()
 	now := time.Now().UTC()
 	tx := store.Transaction{
 		TxID: txID, UserID: req.UserID, QuoteID: req.QuoteID, Amount: req.Amount,
@@ -345,7 +348,8 @@ func withRequestID(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
 		if id == "" {
-			id = uuid.NewString()
+			uid, _ := uuid.NewV7()
+			id = uid.String()
 		}
 		w.Header().Set("X-Request-ID", id)
 		h.ServeHTTP(w, r.WithContext(WithRequestID(r.Context(), id)))

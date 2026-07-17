@@ -20,7 +20,7 @@ func seedTx(t *testing.T, s store.Store, txID string) {
 	now := time.Now().UTC()
 	tx := store.Transaction{
 		TxID: txID, UserID: "u1", QuoteID: "q1", Amount: "100", Asset: "BTC",
-		Rail: "card", DestAddress: "0xabc", Status: statemachine.StateCreated,
+		Rail: "CARD", DestAddress: "0xabc", Status: statemachine.StateCreated,
 		CreatedAt: now, UpdatedAt: now, Version: 1,
 	}
 	var steps []store.StepRow

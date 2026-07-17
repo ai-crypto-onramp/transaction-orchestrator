@@ -22,17 +22,17 @@ type State string
 //
 // The two terminal failure states are failed_compensated and failed.
 const (
-	StateCreated            State = "created"
-	StatePolicyChecked      State = "policy_checked"
-	StatePaymentCaptured    State = "payment_captured"
-	StateKytScreened        State = "kyt_screened"
-	StateSigned             State = "signed"
-	StateBroadcasted        State = "broadcasted"
-	StateConfirmed          State = "confirmed"
-	StateLedgered           State = "ledgered"
-	StateCompleted          State = "completed"
-	StateFailedCompensated  State = "failed_compensated"
-	StateFailed             State = "failed"
+	StateCreated           State = "CREATED"
+	StatePolicyChecked     State = "POLICY_CHECKED"
+	StatePaymentCaptured   State = "PAYMENT_CAPTURED"
+	StateKytScreened       State = "KYT_SCREENED"
+	StateSigned            State = "SIGNED"
+	StateBroadcasted       State = "BROADCASTED"
+	StateConfirmed         State = "CONFIRMED"
+	StateLedgered          State = "LEDGERED"
+	StateCompleted         State = "COMPLETED"
+	StateFailedCompensated State = "FAILED_COMPENSATED"
+	StateFailed            State = "FAILED"
 )
 
 // Terminal reports whether s is a terminal saga state.
@@ -53,12 +53,12 @@ func (s State) IsFailure() bool {
 type Step string
 
 const (
-	StepPolicy     Step = "policy"
-	StepPayment    Step = "payment"
-	StepKyt        Step = "kyt"
-	StepMpcSign    Step = "mpc_sign"
-	StepBroadcast  Step = "broadcast"
-	StepLedger     Step = "ledger"
+	StepPolicy     Step = "POLICY"
+	StepPayment    Step = "PAYMENT"
+	StepKyt        Step = "KYT"
+	StepMpcSign    Step = "MPC_SIGN"
+	StepBroadcast  Step = "BROADCAST"
+	StepLedger     Step = "LEDGER"
 )
 
 // StepOrder is the canonical forward execution order.

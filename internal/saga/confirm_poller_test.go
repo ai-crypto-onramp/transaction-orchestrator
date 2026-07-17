@@ -31,7 +31,7 @@ func seedBroadcastedTx(t *testing.T, s store.Store, txID string) {
 	now := time.Now().UTC()
 	tx := store.Transaction{
 		TxID: txID, UserID: "u", QuoteID: "q", Amount: "1", Asset: "BTC",
-		Rail: "card", DestAddress: "0x", Status: statemachine.StateBroadcasted,
+		Rail: "CARD", DestAddress: "0x", Status: statemachine.StateBroadcasted,
 		CreatedAt: now, UpdatedAt: now, Version: 1,
 	}
 	var steps []store.StepRow
@@ -94,7 +94,7 @@ func TestConfirmPollerMissingTxHash(t *testing.T) {
 	now := time.Now().UTC()
 	tx := store.Transaction{
 		TxID: "tx-poll-3", UserID: "u", QuoteID: "q", Amount: "1", Asset: "BTC",
-		Rail: "card", DestAddress: "0x", Status: statemachine.StateBroadcasted,
+		Rail: "CARD", DestAddress: "0x", Status: statemachine.StateBroadcasted,
 		CreatedAt: now, UpdatedAt: now, Version: 1,
 	}
 	sg := store.SagaState{
@@ -115,7 +115,7 @@ func TestConfirmPollerWrongState(t *testing.T) {
 	now := time.Now().UTC()
 	tx := store.Transaction{
 		TxID: "tx-poll-4", UserID: "u", QuoteID: "q", Amount: "1", Asset: "BTC",
-		Rail: "card", DestAddress: "0x", Status: statemachine.StateCreated,
+		Rail: "CARD", DestAddress: "0x", Status: statemachine.StateCreated,
 		CreatedAt: now, UpdatedAt: now, Version: 1,
 	}
 	sg := store.SagaState{
@@ -136,7 +136,7 @@ func TestConfirmPollerAlreadyConfirmed(t *testing.T) {
 	now := time.Now().UTC()
 	tx := store.Transaction{
 		TxID: "tx-poll-5", UserID: "u", QuoteID: "q", Amount: "1", Asset: "BTC",
-		Rail: "card", DestAddress: "0x", Status: statemachine.StateConfirmed,
+		Rail: "CARD", DestAddress: "0x", Status: statemachine.StateConfirmed,
 		CreatedAt: now, UpdatedAt: now, Version: 1,
 	}
 	sg := store.SagaState{

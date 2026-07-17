@@ -243,7 +243,7 @@ func (e *Executor) advanceToConfirmed(ctx context.Context, txID string) error {
 	if txHash == "" {
 		return errors.New("advance: missing tx_hash")
 	}
-	pollCtx, cancel := context.WithTimeout(ctx, e.Cfg.StepTimeout("broadcast"))
+	pollCtx, cancel := context.WithTimeout(ctx, e.Cfg.StepTimeout("BROADCAST"))
 	defer cancel()
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()

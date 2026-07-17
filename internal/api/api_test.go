@@ -43,7 +43,7 @@ func TestCreateTxHappyPath(t *testing.T) {
 	svc, s := newTestService(t)
 	h := Mux(svc)
 
-	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"card","dest_address":"0xabc"}`
+	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"CARD","dest_address":"0xabc"}`
 	r := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	r = r.WithContext(reqWithLog(context.Background()))
 	rec := httptest.NewRecorder()
@@ -111,7 +111,7 @@ func TestGetTxAndSteps(t *testing.T) {
 	h := Mux(svc)
 	ctx := context.Background()
 
-	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"card","dest_address":"0xabc"}`
+	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"CARD","dest_address":"0xabc"}`
 	r := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	r = r.WithContext(reqWithLog(ctx))
 	rec := httptest.NewRecorder()
@@ -238,7 +238,7 @@ func TestRetryEndpointWithControl(t *testing.T) {
 	h := Mux(svc)
 
 	// Seed a tx so the saga-state lookup path is exercised.
-	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"card","dest_address":"0xabc"}`
+	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"CARD","dest_address":"0xabc"}`
 	r := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	r = r.WithContext(reqWithLog(context.Background()))
 	rec := httptest.NewRecorder()
@@ -266,7 +266,7 @@ func TestRetryEndpointControlError(t *testing.T) {
 	svc.Control = fc
 	h := Mux(svc)
 	// Seed so LoadSagaState works.
-	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"card","dest_address":"0xabc"}`
+	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"CARD","dest_address":"0xabc"}`
 	r := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	r = r.WithContext(reqWithLog(context.Background()))
 	rec := httptest.NewRecorder()
@@ -373,7 +373,7 @@ func TestStepsLoadError(t *testing.T) {
 func TestCreateTxStoreError(t *testing.T) {
 	svc := NewService(&errorStore{}, quotelocker.NewNoop())
 	h := Mux(svc)
-	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"card","dest_address":"0xabc"}`
+	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"CARD","dest_address":"0xabc"}`
 	r := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	r = r.WithContext(reqWithLog(context.Background()))
 	rec := httptest.NewRecorder()
@@ -389,7 +389,7 @@ func TestGetTxSagaLoadError(t *testing.T) {
 	svc := NewService(s, quotelocker.NewNoop())
 	h := Mux(svc)
 	// Seed a tx.
-	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"card","dest_address":"0xabc"}`
+	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"CARD","dest_address":"0xabc"}`
 	r := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	r = r.WithContext(reqWithLog(context.Background()))
 	rec := httptest.NewRecorder()
@@ -411,7 +411,7 @@ func TestCreateTxQuoteLockedConflict(t *testing.T) {
 	s := store.NewMemStore()
 	svc := NewService(s, failingLocker{})
 	h := Mux(svc)
-	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"card","dest_address":"0xabc"}`
+	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"CARD","dest_address":"0xabc"}`
 	r := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	r = r.WithContext(reqWithLog(context.Background()))
 	rec := httptest.NewRecorder()
@@ -432,7 +432,7 @@ func TestCreateTxQuoteLockerError(t *testing.T) {
 	s := store.NewMemStore()
 	svc := NewService(s, errorLocker{})
 	h := Mux(svc)
-	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"card","dest_address":"0xabc"}`
+	body := `{"user_id":"u1","quote_id":"q1","amount":"100","asset":"BTC","rail":"CARD","dest_address":"0xabc"}`
 	r := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	r = r.WithContext(reqWithLog(context.Background()))
 	rec := httptest.NewRecorder()

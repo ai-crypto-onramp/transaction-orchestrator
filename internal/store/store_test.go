@@ -16,7 +16,7 @@ func seedTx(t *testing.T, s *MemStore, txID string) {
 	err := s.RunInTx(ctx, func(ts TxStore) error {
 		tx := Transaction{
 			TxID: txID, UserID: "u1", QuoteID: "q1", Amount: "100", Asset: "BTC",
-			Rail: "card", DestAddress: "0xabc", Status: statemachine.StateCreated,
+			Rail: "CARD", DestAddress: "0xabc", Status: statemachine.StateCreated,
 			CreatedAt: now, UpdatedAt: now, Version: 1,
 		}
 		var steps []StepRow

@@ -128,17 +128,17 @@ func Load() (Config, error) {
 // global default.
 func (c Config) StepTimeout(step string) time.Duration {
 	switch step {
-	case "policy":
+	case "POLICY":
 		return time.Duration(c.StepTimeoutPolicySeconds) * time.Second
-	case "payment":
+	case "PAYMENT":
 		return time.Duration(c.StepTimeoutPaymentSeconds) * time.Second
-	case "kyt":
+	case "KYT":
 		return time.Duration(c.StepTimeoutKytSeconds) * time.Second
-	case "mpc_sign":
+	case "MPC_SIGN":
 		return time.Duration(c.StepTimeoutMpcSeconds) * time.Second
-	case "broadcast":
+	case "BROADCAST":
 		return time.Duration(c.StepTimeoutBroadcastSeconds) * time.Second
-	case "ledger":
+	case "LEDGER":
 		return time.Duration(c.StepTimeoutLedgerSeconds) * time.Second
 	default:
 		return time.Duration(c.StepTimeoutSeconds) * time.Second

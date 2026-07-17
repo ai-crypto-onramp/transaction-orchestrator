@@ -25,25 +25,26 @@ import (
 type StepStatus string
 
 const (
-	StepPending      StepStatus = "pending"
-	StepRunning      StepStatus = "running"
-	StepSucceeded    StepStatus = "succeeded"
-	StepFailed       StepStatus = "failed"
-	StepCompensating StepStatus = "compensating"
-	StepCompensated  StepStatus = "compensated"
+	StepPending      StepStatus = "PENDING"
+	StepRunning      StepStatus = "RUNNING"
+	StepSucceeded    StepStatus = "SUCCEEDED"
+	StepFailed       StepStatus = "FAILED"
+	StepCompensating StepStatus = "COMPENSATING"
+	StepCompensated  StepStatus = "COMPENSATED"
 )
 
 // OutboxStatus is the lifecycle state of an outbox_events row.
 type OutboxStatus string
 
 const (
-	OutboxPending   OutboxStatus = "pending"
-	OutboxInflight  OutboxStatus = "inflight"
-	OutboxPublished OutboxStatus = "published"
+	OutboxPending   OutboxStatus = "PENDING"
+	OutboxInflight  OutboxStatus = "INFLIGHT"
+	OutboxPublished OutboxStatus = "PUBLISHED"
 )
 
 // Transaction is the top-level tx record.
 type Transaction struct {
+	ID          uuid.UUID
 	TxID        string
 	UserID      string
 	QuoteID     string
@@ -59,6 +60,7 @@ type Transaction struct {
 
 // StepRow is one row of transaction_steps.
 type StepRow struct {
+	ID             uuid.UUID
 	TxID           string
 	StepName       statemachine.Step
 	Status         StepStatus
@@ -71,17 +73,19 @@ type StepRow struct {
 
 // SagaState is the durable workflow snapshot.
 type SagaState struct {
-	TxID            string
-	CurrentStep     statemachine.Step
-	State           statemachine.State
-	LeaseOwner      string
-	LeaseExpiresAt  *time.Time
-	Payload         map[string]any
-	Version         int64
+	ID             uuid.UUID
+	TxID           string
+	CurrentStep    statemachine.Step
+	State          statemachine.State
+	LeaseOwner     string
+	LeaseExpiresAt *time.Time
+	Payload        map[string]any
+	Version        int64
 }
 
 // OutboxEvent is one row of outbox_events.
 type OutboxEvent struct {
+	ID          uuid.UUID
 	EventID     string
 	TxID        string
 	EventType   string
@@ -170,8 +174,17 @@ func EncodeJSON(v map[string]any) []byte {
 	return b
 }
 
-// NewEventID returns a fresh event id (uuid v4 string).
-func NewEventID() string { return uuid.NewString() }
+// NewEventID returns a fresh event id (uuid v7 string).
+func NewEventID() string {
+	id, _ := uuid.NewV7()
+	return id.String()
+}
+
+// NewID returns a fresh uuid v7.
+func NewID() uuid.UUID {
+	id, _ := uuid.NewV7()
+	return id
+}
 
 // --- In-memory implementation ------------------------------------------------
 
@@ -288,10 +301,30 @@ func (m *memTxStore) CreateTx(ctx context.Context, t Transaction, steps []StepRo
 	if _, exists := m.s.txs[t.TxID]; exists {
 		return ErrDuplicate
 	}
+	if t.ID == (uuid.UUID{}) {
+		t.ID = NewID()
+	}
 	m.s.txs[t.TxID] = t
-	m.s.steps[t.TxID] = append([]StepRow(nil), steps...)
+	out := make([]StepRow, 0, len(steps))
+	for _, r := range steps {
+		if r.ID == (uuid.UUID{}) {
+			r.ID = NewID()
+		}
+		out = append(out, r)
+	}
+	m.s.steps[t.TxID] = out
+	if saga.ID == (uuid.UUID{}) {
+		saga.ID = NewID()
+	}
 	m.s.sagas[t.TxID] = saga
-	m.s.outbox = append(m.s.outbox, events...)
+	evs := make([]OutboxEvent, 0, len(events))
+	for _, e := range events {
+		if e.ID == (uuid.UUID{}) {
+			e.ID = NewID()
+		}
+		evs = append(evs, e)
+	}
+	m.s.outbox = append(m.s.outbox, evs...)
 	return nil
 }
 
@@ -302,6 +335,9 @@ func (m *memTxStore) InsertStep(ctx context.Context, row StepRow) error {
 		if r.StepName == row.StepName && r.Attempt == row.Attempt {
 			return ErrDuplicate
 		}
+	}
+	if row.ID == (uuid.UUID{}) {
+		row.ID = NewID()
 	}
 	m.s.steps[row.TxID] = append(m.s.steps[row.TxID], row)
 	return nil

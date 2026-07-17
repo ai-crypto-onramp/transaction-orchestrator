@@ -9,6 +9,7 @@ import (
 
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/migrations"
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/statemachine"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -96,10 +97,10 @@ func (s *PgStore) RunInTx(ctx context.Context, fn func(TxStore) error) error {
 
 func (s *PgStore) LoadTx(ctx context.Context, txID string) (Transaction, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT tx_id, user_id, quote_id, amount, asset, rail, dest_address, status, created_at, updated_at, version
+		SELECT id, tx_id, user_id, quote_id, amount, asset, rail, dest_address, status, created_at, updated_at, version
 		FROM transactions WHERE tx_id = $1`, txID)
 	var t Transaction
-	err := row.Scan(&t.TxID, &t.UserID, &t.QuoteID, &t.Amount, &t.Asset, &t.Rail, &t.DestAddress,
+	err := row.Scan(&t.ID, &t.TxID, &t.UserID, &t.QuoteID, &t.Amount, &t.Asset, &t.Rail, &t.DestAddress,
 		&t.Status, &t.CreatedAt, &t.UpdatedAt, &t.Version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Transaction{}, ErrNotFound
@@ -109,14 +110,14 @@ func (s *PgStore) LoadTx(ctx context.Context, txID string) (Transaction, error) 
 
 func (s *PgStore) LoadSagaState(ctx context.Context, txID string) (SagaState, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT tx_id, current_step, state, lease_owner, lease_expires_at, payload, version
+		SELECT id, tx_id, current_step, state, lease_owner, lease_expires_at, payload, version
 		FROM saga_state WHERE tx_id = $1`, txID)
 	return scanSaga(row.Scan)
 }
 
 func (s *PgStore) ListSteps(ctx context.Context, txID string) ([]StepRow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT tx_id, step_name, status, attempt, started_at, finished_at, error, idempotency_key
+		SELECT id, tx_id, step_name, status, attempt, started_at, finished_at, error, idempotency_key
 		FROM transaction_steps WHERE tx_id = $1
 		ORDER BY attempt, step_name`, txID)
 	if err != nil {
@@ -126,7 +127,7 @@ func (s *PgStore) ListSteps(ctx context.Context, txID string) ([]StepRow, error)
 	out := []StepRow{}
 	for rows.Next() {
 		var r StepRow
-		if err := rows.Scan(&r.TxID, &r.StepName, &r.Status, &r.Attempt, &r.StartedAt, &r.FinishedAt, &r.Error, &r.IdempotencyKey); err != nil {
+		if err := rows.Scan(&r.ID, &r.TxID, &r.StepName, &r.Status, &r.Attempt, &r.StartedAt, &r.FinishedAt, &r.Error, &r.IdempotencyKey); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -136,8 +137,8 @@ func (s *PgStore) ListSteps(ctx context.Context, txID string) ([]StepRow, error)
 
 func (s *PgStore) ListOutboxPending(ctx context.Context, limit int) ([]OutboxEvent, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT event_id, tx_id, event_type, step, attempt, payload, created_at, published_at, status, dedup_key
-		FROM outbox_events WHERE status = 'pending'
+		SELECT id, event_id, tx_id, event_type, step, attempt, payload, created_at, published_at, status, dedup_key
+		FROM outbox_events WHERE status = 'PENDING'
 		ORDER BY created_at
 		LIMIT $1`, limit)
 	if err != nil {
@@ -158,7 +159,7 @@ func (s *PgStore) ListOutboxPending(ctx context.Context, limit int) ([]OutboxEve
 func (s *PgStore) ListInflightSagaIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT tx_id FROM saga_state
-		WHERE state NOT IN ('completed','failed_compensated','failed')`)
+		WHERE state NOT IN ('COMPLETED','FAILED_COMPENSATED','FAILED')`)
 	if err != nil {
 		return nil, err
 	}
@@ -179,25 +180,34 @@ type pgTxStore struct {
 }
 
 func (m *pgTxStore) CreateTx(ctx context.Context, t Transaction, steps []StepRow, saga SagaState, events []OutboxEvent) error {
+	if t.ID == (uuid.UUID{}) {
+		t.ID = NewID()
+	}
 	if _, err := m.tx.Exec(ctx, `
-		INSERT INTO transactions (tx_id, user_id, quote_id, amount, asset, rail, dest_address, status, created_at, updated_at, version)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		t.TxID, t.UserID, t.QuoteID, t.Amount, t.Asset, t.Rail, t.DestAddress, t.Status,
+		INSERT INTO transactions (id, tx_id, user_id, quote_id, amount, asset, rail, dest_address, status, created_at, updated_at, version)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		t.ID, t.TxID, t.UserID, t.QuoteID, t.Amount, t.Asset, t.Rail, t.DestAddress, t.Status,
 		t.CreatedAt, t.UpdatedAt, t.Version); err != nil {
 		return mapPgErr(err)
 	}
 	for _, r := range steps {
+		if r.ID == (uuid.UUID{}) {
+			r.ID = NewID()
+		}
 		if _, err := m.tx.Exec(ctx, `
-			INSERT INTO transaction_steps (tx_id, step_name, status, attempt, started_at, finished_at, error, idempotency_key)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-			r.TxID, r.StepName, r.Status, r.Attempt, r.StartedAt, r.FinishedAt, r.Error, r.IdempotencyKey); err != nil {
+			INSERT INTO transaction_steps (id, tx_id, step_name, status, attempt, started_at, finished_at, error, idempotency_key)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			r.ID, r.TxID, r.StepName, r.Status, r.Attempt, r.StartedAt, r.FinishedAt, r.Error, r.IdempotencyKey); err != nil {
 			return mapPgErr(err)
 		}
 	}
+	if saga.ID == (uuid.UUID{}) {
+		saga.ID = NewID()
+	}
 	if _, err := m.tx.Exec(ctx, `
-		INSERT INTO saga_state (tx_id, current_step, state, lease_owner, lease_expires_at, payload, version)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		saga.TxID, saga.CurrentStep, saga.State, saga.LeaseOwner, saga.LeaseExpiresAt, EncodeJSON(saga.Payload), saga.Version); err != nil {
+		INSERT INTO saga_state (id, tx_id, current_step, state, lease_owner, lease_expires_at, payload, version)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		saga.ID, saga.TxID, saga.CurrentStep, saga.State, saga.LeaseOwner, saga.LeaseExpiresAt, EncodeJSON(saga.Payload), saga.Version); err != nil {
 		return mapPgErr(err)
 	}
 	if err := m.AppendOutbox(ctx, events); err != nil {
@@ -207,17 +217,20 @@ func (m *pgTxStore) CreateTx(ctx context.Context, t Transaction, steps []StepRow
 }
 
 func (m *pgTxStore) InsertStep(ctx context.Context, row StepRow) error {
+	if row.ID == (uuid.UUID{}) {
+		row.ID = NewID()
+	}
 	_, err := m.tx.Exec(ctx, `
-		INSERT INTO transaction_steps (tx_id, step_name, status, attempt, started_at, finished_at, error, idempotency_key)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		row.TxID, row.StepName, row.Status, row.Attempt, row.StartedAt, row.FinishedAt, row.Error, row.IdempotencyKey)
+		INSERT INTO transaction_steps (id, tx_id, step_name, status, attempt, started_at, finished_at, error, idempotency_key)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		row.ID, row.TxID, row.StepName, row.Status, row.Attempt, row.StartedAt, row.FinishedAt, row.Error, row.IdempotencyKey)
 	return mapPgErr(err)
 }
 
 func (m *pgTxStore) UpdateStep(ctx context.Context, row StepRow) error {
 	ct, err := m.tx.Exec(ctx, `
 		UPDATE transaction_steps
-		SET status=$2, started_at=$3, finished_at=$4, error=$5
+		SET status=$2, started_at=$3, finished_at=$4, error=$5, updated_at=now()
 		WHERE tx_id=$1 AND step_name=$6 AND attempt=$7`,
 		row.TxID, row.Status, row.StartedAt, row.FinishedAt, row.Error, row.StepName, row.Attempt)
 	if err != nil {
@@ -231,10 +244,10 @@ func (m *pgTxStore) UpdateStep(ctx context.Context, row StepRow) error {
 
 func (m *pgTxStore) LoadStep(ctx context.Context, txID string, step statemachine.Step, attempt int) (StepRow, error) {
 	row := m.tx.QueryRow(ctx, `
-		SELECT tx_id, step_name, status, attempt, started_at, finished_at, error, idempotency_key
+		SELECT id, tx_id, step_name, status, attempt, started_at, finished_at, error, idempotency_key
 		FROM transaction_steps WHERE tx_id=$1 AND step_name=$2 AND attempt=$3`, txID, step, attempt)
 	var r StepRow
-	err := row.Scan(&r.TxID, &r.StepName, &r.Status, &r.Attempt, &r.StartedAt, &r.FinishedAt, &r.Error, &r.IdempotencyKey)
+	err := row.Scan(&r.ID, &r.TxID, &r.StepName, &r.Status, &r.Attempt, &r.StartedAt, &r.FinishedAt, &r.Error, &r.IdempotencyKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return StepRow{}, ErrNotFound
 	}
@@ -257,7 +270,7 @@ func (m *pgTxStore) UpdateTransactionStatus(ctx context.Context, txID string, st
 func (m *pgTxStore) SaveSagaState(ctx context.Context, saga SagaState) error {
 	ct, err := m.tx.Exec(ctx, `
 		UPDATE saga_state
-		SET current_step=$2, state=$3, lease_owner=$4, lease_expires_at=$5, payload=$6, version=version+1
+		SET current_step=$2, state=$3, lease_owner=$4, lease_expires_at=$5, payload=$6, version=version+1, updated_at=now()
 		WHERE tx_id=$1 AND version=$7`,
 		saga.TxID, saga.CurrentStep, saga.State, saga.LeaseOwner, saga.LeaseExpiresAt, EncodeJSON(saga.Payload), saga.Version-1)
 	if err != nil {
@@ -271,20 +284,23 @@ func (m *pgTxStore) SaveSagaState(ctx context.Context, saga SagaState) error {
 
 func (m *pgTxStore) LoadSagaState(ctx context.Context, txID string) (SagaState, error) {
 	row := m.tx.QueryRow(ctx, `
-		SELECT tx_id, current_step, state, lease_owner, lease_expires_at, payload, version
+		SELECT id, tx_id, current_step, state, lease_owner, lease_expires_at, payload, version
 		FROM saga_state WHERE tx_id=$1`, txID)
 	return scanSaga(row.Scan)
 }
 
 func (m *pgTxStore) AppendOutbox(ctx context.Context, events []OutboxEvent) error {
 	for _, e := range events {
+		if e.ID == (uuid.UUID{}) {
+			e.ID = NewID()
+		}
 		if e.EventID == "" {
 			e.EventID = NewEventID()
 		}
 		if _, err := m.tx.Exec(ctx, `
-			INSERT INTO outbox_events (event_id, tx_id, event_type, step, attempt, payload, created_at, status, dedup_key)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-			e.EventID, e.TxID, e.EventType, e.Step, e.Attempt, EncodeJSON(e.Payload), e.CreatedAt, e.Status, e.DedupKey); err != nil {
+			INSERT INTO outbox_events (id, event_id, tx_id, event_type, step, attempt, payload, created_at, status, dedup_key)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			e.ID, e.EventID, e.TxID, e.EventType, e.Step, e.Attempt, EncodeJSON(e.Payload), e.CreatedAt, e.Status, e.DedupKey); err != nil {
 			return mapPgErr(err)
 		}
 	}
@@ -294,7 +310,7 @@ func (m *pgTxStore) AppendOutbox(ctx context.Context, events []OutboxEvent) erro
 func (m *pgTxStore) MarkOutboxPublished(ctx context.Context, eventIDs []string, at time.Time) error {
 	for _, id := range eventIDs {
 		if _, err := m.tx.Exec(ctx, `
-			UPDATE outbox_events SET status='published', published_at=$2 WHERE event_id=$1`, id, at); err != nil {
+			UPDATE outbox_events SET status='PUBLISHED', published_at=$2, updated_at=now() WHERE event_id=$1`, id, at); err != nil {
 			return mapPgErr(err)
 		}
 	}
@@ -306,8 +322,8 @@ func (m *pgTxStore) MarkOutboxPublished(ctx context.Context, eventIDs []string, 
 // Tx; the row lock is released on commit/rollback.
 func (m *pgTxStore) ClaimOutboxPending(ctx context.Context, limit int) ([]OutboxEvent, error) {
 	rows, err := m.tx.Query(ctx, `
-		SELECT event_id, tx_id, event_type, step, attempt, payload, created_at, published_at, status, dedup_key
-		FROM outbox_events WHERE status='pending'
+		SELECT id, event_id, tx_id, event_type, step, attempt, payload, created_at, published_at, status, dedup_key
+		FROM outbox_events WHERE status='PENDING'
 		ORDER BY created_at
 		LIMIT $1
 		FOR UPDATE SKIP LOCKED`, limit)
@@ -326,10 +342,10 @@ func (m *pgTxStore) ClaimOutboxPending(ctx context.Context, limit int) ([]Outbox
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// Flip the claimed rows to 'inflight' so a crashed relay's rows can be
+	// Flip the claimed rows to 'INFLIGHT' so a crashed relay's rows can be
 	// reclaimed by a reaper.
 	for _, e := range out {
-		if _, err := m.tx.Exec(ctx, `UPDATE outbox_events SET status='inflight' WHERE event_id=$1`, e.EventID); err != nil {
+		if _, err := m.tx.Exec(ctx, `UPDATE outbox_events SET status='INFLIGHT', updated_at=now() WHERE event_id=$1`, e.EventID); err != nil {
 			return nil, mapPgErr(err)
 		}
 	}
@@ -343,7 +359,7 @@ func scanSaga(scan func(...any) error) (SagaState, error) {
 	var leaseOwner *string
 	var leaseExpiry *time.Time
 	var payload []byte
-	err := scan(&s.TxID, &s.CurrentStep, &s.State, &leaseOwner, &leaseExpiry, &payload, &s.Version)
+	err := scan(&s.ID, &s.TxID, &s.CurrentStep, &s.State, &leaseOwner, &leaseExpiry, &payload, &s.Version)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return SagaState{}, ErrNotFound
@@ -361,7 +377,7 @@ func scanSaga(scan func(...any) error) (SagaState, error) {
 func scanEvent(scan func(...any) error, e *OutboxEvent) error {
 	var publishedAt *time.Time
 	var payload []byte
-	if err := scan(&e.EventID, &e.TxID, &e.EventType, &e.Step, &e.Attempt, &payload, &e.CreatedAt, &publishedAt, &e.Status, &e.DedupKey); err != nil {
+	if err := scan(&e.ID, &e.EventID, &e.TxID, &e.EventType, &e.Step, &e.Attempt, &payload, &e.CreatedAt, &publishedAt, &e.Status, &e.DedupKey); err != nil {
 		return err
 	}
 	e.PublishedAt = publishedAt
