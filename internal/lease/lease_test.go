@@ -30,3 +30,23 @@ func TestInMemoryReleaseIsIdempotent(t *testing.T) {
 	rel()
 	rel() // must not panic
 }
+
+func TestNewInMemoryDefaultsTTL(t *testing.T) {
+	l := NewInMemory(0)
+	if l.ttl != 30*time.Second {
+		t.Fatalf("expected default 30s TTL, got %v", l.ttl)
+	}
+	l2 := NewInMemory(-time.Second)
+	if l2.ttl != 30*time.Second {
+		t.Fatalf("expected default 30s TTL for negative, got %v", l2.ttl)
+	}
+}
+
+func TestInMemoryAcquireTTLDefaulting(t *testing.T) {
+	l := NewInMemory(time.Second)
+	rel, ok, err := l.Acquire(context.Background(), "tx-ttl", "o", 0)
+	if err != nil || !ok {
+		t.Fatalf("acquire with ttl=0: ok=%v err=%v", ok, err)
+	}
+	rel()
+}

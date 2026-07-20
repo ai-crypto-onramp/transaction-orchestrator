@@ -111,3 +111,40 @@ func TestMustTransitionPanics(t *testing.T) {
 	}()
 	_ = MustTransition(StateCreated, StateCompleted)
 }
+
+func TestMustTransitionSuccessReturnsNext(t *testing.T) {
+	if got := MustTransition(StateCreated, StatePolicyChecked); got != StatePolicyChecked {
+		t.Fatalf("expected policy_checked, got %s", got)
+	}
+	if got := MustTransition(StateCreated, StateFailedCompensated); got != StateFailedCompensated {
+		t.Fatalf("expected failed_compensated, got %s", got)
+	}
+}
+
+func TestTerminalStatesExhaustive(t *testing.T) {
+	all := []State{
+		StateCreated, StatePolicyChecked, StatePaymentCaptured, StateKytScreened,
+		StateSigned, StateBroadcasted, StateConfirmed, StateLedgered,
+		StateCompleted, StateFailedCompensated, StateFailed,
+	}
+	for _, s := range all {
+		switch s {
+		case StateCompleted, StateFailedCompensated, StateFailed:
+			if !s.Terminal() {
+				t.Fatalf("%s should be terminal", s)
+			}
+		default:
+			if s.Terminal() {
+				t.Fatalf("%s should not be terminal", s)
+			}
+		}
+	}
+}
+
+func TestTransitionFromTerminalRejected(t *testing.T) {
+	for _, s := range []State{StateCompleted, StateFailedCompensated, StateFailed} {
+		if _, err := Transition(s, StateCreated); err == nil {
+			t.Fatalf("expected error transitioning from terminal %s", s)
+		}
+	}
+}

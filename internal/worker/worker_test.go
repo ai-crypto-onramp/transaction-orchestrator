@@ -351,3 +351,44 @@ func TestControlCompensateUnknownStep(t *testing.T) {
 
 // Ensure the atomic import is exercised (sanity).
 var _ = atomic.AddInt32
+
+func TestNewDefaultsConcurrencyAndOwner(t *testing.T) {
+	s := store.NewMemStore()
+	ex := saga.NewExecutor(s, testClients(), testCfg())
+	d := New(s, ex, 0, "")
+	if d.Concurrency != 32 {
+		t.Fatalf("expected default concurrency 32, got %d", d.Concurrency)
+	}
+	if d.Owner == "" {
+		t.Fatal("expected non-empty default owner")
+	}
+	if len(d.partitions) != 32 {
+		t.Fatalf("expected 32 partitions, got %d", len(d.partitions))
+	}
+}
+
+func TestRecoverStoreError(t *testing.T) {
+	s := store.NewMemStore()
+	ex := saga.NewExecutor(s, testClients(), testCfg())
+	d := New(s, ex, 2, "owner")
+	es := &errListStore{MemStore: store.NewMemStore()}
+	d.Store = es
+	if err := d.Recover(context.Background()); err == nil {
+		t.Fatal("expected error from Recover with failing store")
+	}
+}
+
+type errListStore struct{ *store.MemStore }
+
+func (e *errListStore) ListInflightSagaIDs(ctx context.Context) ([]string, error) {
+	return nil, errors.New("boom")
+}
+
+func TestStopIsIdempotent(t *testing.T) {
+	s := store.NewMemStore()
+	ex := saga.NewExecutor(s, testClients(), testCfg())
+	d := New(s, ex, 2, "owner")
+	d.Start(context.Background())
+	d.Stop()
+	d.Stop() // must not panic or hang
+}
