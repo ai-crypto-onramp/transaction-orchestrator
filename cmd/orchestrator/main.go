@@ -48,10 +48,17 @@ func run() error {
 	log := logging.New(cfg.LogLevel)
 	ctx = logging.WithLogger(ctx, log)
 
+	devMode := os.Getenv("DEV_MODE") == "1"
+
 	// Open the store.  The Postgres pool is opened lazily; for Stage 2 unit
 	// tests we accept either DB_URL (Postgres) or its absence (in-memory).
 	var s store.Store
 	if cfg.DBURL == "" {
+		if !devMode {
+			log.Error("DB_URL not set and DEV_MODE!=1; refusing to start in production mode")
+			return errors.New("DB_URL not set and DEV_MODE!=1; refusing to start in production mode")
+		}
+		log.Warn("DEV_MODE=1: DB_URL unset — using in-memory store (NOT FOR PRODUCTION)")
 		s = store.NewMemStore()
 	} else {
 		ps, err := store.NewPgStore(ctx, cfg.DBURL)
@@ -65,12 +72,25 @@ func run() error {
 
 	svc := api.NewService(s, quotelocker.NewNoop())
 
-	// Build the saga partner clients.  When a *_URL is set to "stub://" (or
-	// empty) we use the in-memory Stub so the server can boot without real
-	// partner services.  Otherwise we dial the gRPC endpoint.
+	// Build the saga partner clients.  Two modes:
+	//   - DEV_MODE=1 (or ENABLE_STUB_PARTNERS=1): stubs are the default; any
+	//     *_URL that is set and dials successfully replaces the stub for that
+	//     partner.  Dial failures fall back to the stub with a warning.  This
+	//     is the test / dev path.
+	//   - DEV_MODE!=1 (the compose default): real partners are required.  The
+	//     four gRPC partners (policy, kyt, mpc, ledger) must have their *_URL
+	//     set and must dial successfully; any failure is fatal.
+	//     payment-orchestration and blockchain-gateway are REST-only today and
+	//     the orchestrator has no REST-to-gRPC adapter yet, so PAYMENT_URL /
+	//     BLOCKCHAIN_URL being set is also fatal — set DEV_MODE=1
+	//     until the gRPC adapter (workstream 1) lands.
 	stub := partner.NewStub(partner.DefaultStubConfig())
 	clients := &saga.Clients{Policy: stub, Payment: stub, Kyt: stub, Mpc: stub, Blockchain: stub, Ledger: stub, Audit: stub}
-	grpcConns := dialPartners(ctx, cfg, clients, log)
+	stubMode := devMode || os.Getenv("ENABLE_STUB_PARTNERS") == "1"
+	if stubMode {
+		log.Warn("DEV_MODE=1 or ENABLE_STUB_PARTNERS=1: using in-memory partner stubs; not safe for production")
+	}
+	grpcConns := dialPartners(ctx, cfg, clients, log, stubMode)
 	defer closeConns(grpcConns)
 
 	// Build the executor + lease manager + worker pool.
@@ -172,70 +192,102 @@ func closeConns(conns []*grpcConn) {
 
 // dialPartners dials every partner service whose *_URL is set to a non-stub
 // endpoint and replaces the corresponding stub in clients with the real gRPC
-// client.  Dial failures fall back to the stub and log a warning.
-func dialPartners(ctx context.Context, cfg config.Config, clients *saga.Clients, log *slog.Logger) []*grpcConn {
+// client.
+//
+// In stub mode (ENABLE_STUB_PARTNERS=1) a missing URL or a dial failure falls
+// back to the stub and logs a warning.  In prod mode (ENABLE_STUB_PARTNERS !=
+// "1") the four gRPC partners (policy, kyt, mpc, ledger) must have their URL
+// set and must dial successfully; any failure is fatal.  payment and blockchain
+// have no gRPC server yet and the orchestrator has no REST adapter, so a set
+// PAYMENT_URL / BLOCKCHAIN_URL is fatal in prod mode — the operator must set
+// ENABLE_STUB_PARTNERS=1 or implement the adapter (workstream 1).
+func dialPartners(ctx context.Context, cfg config.Config, clients *saga.Clients, log *slog.Logger, stubMode bool) []*grpcConn {
 	var conns []*grpcConn
+
+	// REST-only partners that have no gRPC adapter in the orchestrator yet.
+	// In prod mode a set URL is a hard error: the operator must opt into stub
+	// mode until workstream 1 ships the adapter.
+	restOnly := []struct {
+		name, url string
+	}{
+		{"payment", cfg.PaymentURL},
+		{"blockchain", cfg.BlockchainURL},
+	}
+	for _, r := range restOnly {
+		if r.url == "" || r.url == "stub://" {
+			continue
+		}
+		if stubMode {
+			log.Warn(r.name+" URL is set but orchestrator has no REST-to-gRPC adapter; staying on stub", "url", r.url)
+			continue
+		}
+		log.Error(r.name + " gRPC adapter not yet implemented; set ENABLE_STUB_PARTNERS=1 or implement adapter (workstream 1)")
+		os.Exit(1)
+	}
+
 	dials := []struct {
 		name string
 		url  string
 	}{
 		{"policy", cfg.PolicyURL},
-		{"payment", cfg.PaymentURL},
 		{"kyt", cfg.KytURL},
 		{"mpc", cfg.MpcURL},
-		{"blockchain", cfg.BlockchainURL},
 		{"ledger", cfg.LedgerURL},
 	}
 	for _, d := range dials {
 		if d.url == "" || d.url == "stub://" {
-			continue
+			if stubMode {
+				continue
+			}
+			log.Error("missing required partner URL (ENABLE_STUB_PARTNERS != 1)", "partner", d.name)
+			os.Exit(1)
 		}
 		switch d.name {
 		case "policy":
 			c, cc, err := grpcclient.NewPolicy(ctx, d.url)
 			if err != nil {
-				log.Warn("policy dial failed; using stub", "err", err)
-				continue
+				if stubMode {
+					log.Warn("policy dial failed; using stub", "err", err)
+					continue
+				}
+				log.Error("policy dial failed (ENABLE_STUB_PARTNERS != 1)", "err", err)
+				os.Exit(1)
 			}
 			clients.Policy = c
-			conns = append(conns, &grpcConn{cc, d.name})
-		case "payment":
-			c, cc, err := grpcclient.NewPayment(ctx, d.url)
-			if err != nil {
-				log.Warn("payment dial failed; using stub", "err", err)
-				continue
-			}
-			clients.Payment = c
 			conns = append(conns, &grpcConn{cc, d.name})
 		case "kyt":
 			c, cc, err := grpcclient.NewKyt(ctx, d.url)
 			if err != nil {
-				log.Warn("kyt dial failed; using stub", "err", err)
-				continue
+				if stubMode {
+					log.Warn("kyt dial failed; using stub", "err", err)
+					continue
+				}
+				log.Error("kyt dial failed (ENABLE_STUB_PARTNERS != 1)", "err", err)
+				os.Exit(1)
 			}
 			clients.Kyt = c
 			conns = append(conns, &grpcConn{cc, d.name})
 		case "mpc":
 			c, cc, err := grpcclient.NewMpc(ctx, d.url)
 			if err != nil {
-				log.Warn("mpc dial failed; using stub", "err", err)
-				continue
+				if stubMode {
+					log.Warn("mpc dial failed; using stub", "err", err)
+					continue
+				}
+				log.Error("mpc dial failed (ENABLE_STUB_PARTNERS != 1)", "err", err)
+				os.Exit(1)
 			}
 			clients.Mpc = c
-			conns = append(conns, &grpcConn{cc, d.name})
-		case "blockchain":
-			c, cc, err := grpcclient.NewBlockchain(ctx, d.url)
-			if err != nil {
-				log.Warn("blockchain dial failed; using stub", "err", err)
-				continue
-			}
-			clients.Blockchain = c
 			conns = append(conns, &grpcConn{cc, d.name})
 		case "ledger":
 			c, cc, err := grpcclient.NewLedger(ctx, d.url)
 			if err != nil {
-				log.Warn("ledger dial failed; using stub", "err", err)
-				continue
+				if stubMode {
+					log.Warn("ledger dial failed; using stub", "err", err)
+					continue
+				}
+				log.Error("ledger dial failed (ENABLE_STUB_PARTNERS != 1)", "err", err)
+				os.Exit(1)
 			}
 			clients.Ledger = c
 			conns = append(conns, &grpcConn{cc, d.name})
