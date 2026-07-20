@@ -161,39 +161,6 @@ func (s *ledgerServer) PostDoubleEntry(ctx context.Context, req *pbledger.Ledger
 
 // --- helpers -----------------------------------------------------------------
 
-// startServer registers srv as a unary gRPC server behind a bufconn listener
-// and returns a target string suitable for grpc.NewClient along with a cleanup
-// function. The caller may close the conn via cleanup.
-func startServer(t *testing.T, register func(s *grpc.Server)) (target string, cleanup func()) {
-	t.Helper()
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer()
-	register(srv)
-	go func() { _ = srv.Serve(lis) }()
-	dialer := func(context.Context, string) (net.Conn, error) { return lis.Dial() }
-	cc, err := grpc.NewClient("passthrough://bufnet",
-		grpc.WithContextDialer(dialer),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		srv.Stop()
-		t.Fatalf("grpc.NewClient: %v", err)
-	}
-	// grpc.NewClient uses a "passthrough" resolver; the dialer above ignores
-	// the target. We return the conn so callers can Close it, but the
-	// grpcclient constructors dial a fresh conn from the target string.
-	// To exercise the real NewPolicy/NewPayment/etc. constructors we need
-	// the target to resolve via the dialer. We instead expose the *ClientConn
-	// via a package-level override path by injecting the constructed clients
-	// directly. So: target here is unused for the New* constructors; we use
-	// the dialer-based conn to build the wrapped clients through a helper.
-	_ = cc
-	return "passthrough://bufnet", func() {
-		_ = cc.Close()
-		srv.Stop()
-	}
-}
-
 // newClientConn creates a bufconn-backed ClientConn that can be passed to the
 // generated pb.NewXClient constructors, which is how the wrapper clients are
 // built in the package's New* functions. The returned conn must be closed.
