@@ -204,9 +204,6 @@ func closeConns(conns []*grpcConn) {
 func dialPartners(ctx context.Context, cfg config.Config, clients *saga.Clients, log *slog.Logger, stubMode bool) []*grpcConn {
 	var conns []*grpcConn
 
-	// REST-only partners that have no gRPC adapter in the orchestrator yet.
-	// In prod mode a set URL is a hard error: the operator must opt into stub
-	// mode until workstream 1 ships the adapter.
 	restOnly := []struct {
 		name, url string
 	}{
@@ -242,56 +239,57 @@ func dialPartners(ctx context.Context, cfg config.Config, clients *saga.Clients,
 			log.Error("missing required partner URL (ENABLE_STUB_PARTNERS != 1)", "partner", d.name)
 			os.Exit(1)
 		}
-		switch d.name {
-		case "policy":
-			c, cc, err := grpcclient.NewPolicy(ctx, d.url)
-			if err != nil {
-				if stubMode {
-					log.Warn("policy dial failed; using stub", "err", err)
-					continue
-				}
-				log.Error("policy dial failed (ENABLE_STUB_PARTNERS != 1)", "err", err)
-				os.Exit(1)
-			}
-			clients.Policy = c
-			conns = append(conns, &grpcConn{cc, d.name})
-		case "kyt":
-			c, cc, err := grpcclient.NewKyt(ctx, d.url)
-			if err != nil {
-				if stubMode {
-					log.Warn("kyt dial failed; using stub", "err", err)
-					continue
-				}
-				log.Error("kyt dial failed (ENABLE_STUB_PARTNERS != 1)", "err", err)
-				os.Exit(1)
-			}
-			clients.Kyt = c
-			conns = append(conns, &grpcConn{cc, d.name})
-		case "mpc":
-			c, cc, err := grpcclient.NewMpc(ctx, d.url)
-			if err != nil {
-				if stubMode {
-					log.Warn("mpc dial failed; using stub", "err", err)
-					continue
-				}
-				log.Error("mpc dial failed (ENABLE_STUB_PARTNERS != 1)", "err", err)
-				os.Exit(1)
-			}
-			clients.Mpc = c
-			conns = append(conns, &grpcConn{cc, d.name})
-		case "ledger":
-			c, cc, err := grpcclient.NewLedger(ctx, d.url)
-			if err != nil {
-				if stubMode {
-					log.Warn("ledger dial failed; using stub", "err", err)
-					continue
-				}
-				log.Error("ledger dial failed (ENABLE_STUB_PARTNERS != 1)", "err", err)
-				os.Exit(1)
-			}
-			clients.Ledger = c
+		cc, err := dialOnePartner(ctx, d.name, d.url, clients, log, stubMode)
+		if err != nil {
+			os.Exit(1)
+		}
+		if cc != nil {
 			conns = append(conns, &grpcConn{cc, d.name})
 		}
 	}
 	return conns
+}
+
+func dialOnePartner(ctx context.Context, name, url string, clients *saga.Clients, log *slog.Logger, stubMode bool) (*grpc.ClientConn, error) {
+	var (
+		cc  *grpc.ClientConn
+		err error
+	)
+	switch name {
+	case "policy":
+		var c *grpcclient.PolicyClient
+		c, cc, err = grpcclient.NewPolicy(ctx, url)
+		if err == nil {
+			clients.Policy = c
+		}
+	case "kyt":
+		var c *grpcclient.KytClient
+		c, cc, err = grpcclient.NewKyt(ctx, url)
+		if err == nil {
+			clients.Kyt = c
+		}
+	case "mpc":
+		var c *grpcclient.MpcClient
+		c, cc, err = grpcclient.NewMpc(ctx, url)
+		if err == nil {
+			clients.Mpc = c
+		}
+	case "ledger":
+		var c *grpcclient.LedgerClient
+		c, cc, err = grpcclient.NewLedger(ctx, url)
+		if err == nil {
+			clients.Ledger = c
+		}
+	default:
+		return nil, nil
+	}
+	if err != nil {
+		if stubMode {
+			log.Warn(name+" dial failed; using stub", "err", err)
+			return nil, nil
+		}
+		log.Error(name+" dial failed (ENABLE_STUB_PARTNERS != 1)", "err", err)
+		return nil, err
+	}
+	return cc, nil
 }
