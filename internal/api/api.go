@@ -1,12 +1,13 @@
 // Package api implements the public REST API for the Transaction Orchestrator.
 //
 // Endpoints:
-//   POST   /v1/transactions          — create a tx and its initial saga rows
-//   GET    /v1/transactions/:id      — full state + current step + history
-//   GET    /v1/transactions/:id/steps — ordered step list
-//   POST   /v1/transactions/:id/retry     — force-retry failed step (Stage 8)
-//   POST   /v1/transactions/:id/compensate — manual compensation (Stage 8)
-//   GET    /healthz /readyz
+//
+//	POST   /v1/transactions          — create a tx and its initial saga rows
+//	GET    /v1/transactions/:id      — full state + current step + history
+//	GET    /v1/transactions/:id/steps — ordered step list
+//	POST   /v1/transactions/:id/retry     — force-retry failed step (Stage 8)
+//	POST   /v1/transactions/:id/compensate — manual compensation (Stage 8)
+//	GET    /healthz /readyz
 //
 // All handler methods take a *Service which owns the Store, QuoteLocker, and
 // logger, keeping the HTTP layer thin and unit-testable.
@@ -21,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/authtoken"
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/logging"
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/quotelocker"
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/statemachine"
@@ -69,20 +71,20 @@ type CreateTxResponse struct {
 }
 
 type TxResponse struct {
-	TxID        string             `json:"tx_id"`
-	UserID      string             `json:"user_id"`
-	QuoteID     string             `json:"quote_id"`
-	Amount      string             `json:"amount"`
-	Asset       string             `json:"asset"`
-	Rail        string             `json:"rail"`
-	DestAddress string             `json:"dest_address"`
-	Status      string             `json:"status"`
-	CurrentStep string             `json:"current_step"`
-	State       string             `json:"state"`
-	Version     int64              `json:"version"`
-	CreatedAt   time.Time          `json:"created_at"`
-	UpdatedAt   time.Time          `json:"updated_at"`
-	Steps       []StepRowResponse  `json:"steps"`
+	TxID        string            `json:"tx_id"`
+	UserID      string            `json:"user_id"`
+	QuoteID     string            `json:"quote_id"`
+	Amount      string            `json:"amount"`
+	Asset       string            `json:"asset"`
+	Rail        string            `json:"rail"`
+	DestAddress string            `json:"dest_address"`
+	Status      string            `json:"status"`
+	CurrentStep string            `json:"current_step"`
+	State       string            `json:"state"`
+	Version     int64             `json:"version"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+	Steps       []StepRowResponse `json:"steps"`
 }
 
 type StepRowResponse struct {
@@ -95,7 +97,9 @@ type StepRowResponse struct {
 	IdempotencyKey string     `json:"idempotency_key"`
 }
 
-type errorBody struct{ Error string `json:"error"` }
+type errorBody struct {
+	Error string `json:"error"`
+}
 
 // --- Handlers ----------------------------------------------------------------
 
@@ -109,7 +113,8 @@ func Mux(svc *Service) http.Handler {
 	mux.HandleFunc("GET /v1/transactions/{id}/steps", svc.handleSteps)
 	mux.HandleFunc("POST /v1/transactions/{id}/retry", svc.handleRetry)
 	mux.HandleFunc("POST /v1/transactions/{id}/compensate", svc.handleCompensate)
-	return withRequestID(mux)
+	secret, bypass := authtoken.SecretFromEnv()
+	return authtoken.Middleware(secret, bypass)(withRequestID(mux))
 }
 
 func healthz(w http.ResponseWriter, r *http.Request) {

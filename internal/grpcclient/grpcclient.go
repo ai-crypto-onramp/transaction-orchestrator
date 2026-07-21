@@ -12,7 +12,10 @@ package grpcclient
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ai-crypto-onramp/transaction-orchestrator/internal/partner"
@@ -24,12 +27,62 @@ import (
 	pbpolicy "github.com/ai-crypto-onramp/transaction-orchestrator/internal/pb/policy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
 // defaultCallTimeout caps each individual RPC.
 const defaultCallTimeout = 30 * time.Second
+
+// loadTLSConfig reads TLS_CERT_FILE / TLS_KEY_FILE / TLS_CA_FILE and returns
+// a *tls.Config suitable for grpc.WithTransportCredentials(credentials.NewTLS).
+// In DEV_MODE=1 with all three unset it returns nil (caller falls back to
+// insecure). In prod a missing trio is fatal.
+func loadTLSConfig() (*tls.Config, error) {
+	cert := os.Getenv("TLS_CERT_FILE")
+	key := os.Getenv("TLS_KEY_FILE")
+	ca := os.Getenv("TLS_CA_FILE")
+	if cert == "" && key == "" && ca == "" {
+		if os.Getenv("DEV_MODE") == "1" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("grpcclient: TLS_CERT_FILE/TLS_KEY_FILE/TLS_CA_FILE required when DEV_MODE!=1")
+	}
+	if cert == "" || key == "" || ca == "" {
+		return nil, fmt.Errorf("grpcclient: TLS_CERT_FILE, TLS_KEY_FILE and TLS_CA_FILE must all be set together")
+	}
+	pair, err := tls.LoadX509KeyPair(cert, key)
+	if err != nil {
+		return nil, fmt.Errorf("grpcclient: load keypair: %w", err)
+	}
+	caPEM, err := os.ReadFile(ca)
+	if err != nil {
+		return nil, fmt.Errorf("grpcclient: read CA: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("grpcclient: failed to parse CA bundle %s", ca)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{pair},
+		RootCAs:      pool,
+		MinVersion:   tls.VersionTLS12,
+	}, nil
+}
+
+// transportCredentials returns the gRPC dial credentials for partner dials:
+// TLS when configured, insecure in DEV_MODE when no TLS material is present.
+func transportCredentials() (credentials.TransportCredentials, error) {
+	cfg, err := loadTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return insecure.NewCredentials(), nil
+	}
+	return credentials.NewTLS(cfg), nil
+}
 
 // --- status -> partner error ----------------------------------------------
 
@@ -54,11 +107,17 @@ func mapErr(err error) error {
 // --- policy ------------------------------------------------------------------
 
 // PolicyClient wraps the generated gRPC client and implements partner.Policy.
-type PolicyClient struct{ cc pbpolicy.PolicyRiskEngineClient }
+type PolicyClient struct {
+	cc pbpolicy.PolicyRiskEngineClient
+}
 
 // NewPolicy dials target and returns a PolicyClient.
 func NewPolicy(ctx context.Context, target string) (*PolicyClient, *grpc.ClientConn, error) {
-	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	creds, err := transportCredentials()
+	if err != nil {
+		return nil, nil, fmt.Errorf("policy tls: %w", err)
+	}
+	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, nil, fmt.Errorf("policy dial %s: %w", target, err)
 	}
@@ -82,11 +141,17 @@ func (c *PolicyClient) Evaluate(ctx context.Context, req partner.PolicyRequest) 
 // --- payment -----------------------------------------------------------------
 
 // PaymentClient wraps the generated gRPC client and implements partner.Payment.
-type PaymentClient struct{ cc pbpayment.PaymentOrchestrationClient }
+type PaymentClient struct {
+	cc pbpayment.PaymentOrchestrationClient
+}
 
 // NewPayment dials target and returns a PaymentClient.
 func NewPayment(ctx context.Context, target string) (*PaymentClient, *grpc.ClientConn, error) {
-	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	creds, err := transportCredentials()
+	if err != nil {
+		return nil, nil, fmt.Errorf("payment tls: %w", err)
+	}
+	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, nil, fmt.Errorf("payment dial %s: %w", target, err)
 	}
@@ -145,7 +210,11 @@ type KytClient struct{ cc pbkyt.AmlKytScreeningClient }
 
 // NewKyt dials target and returns a KytClient.
 func NewKyt(ctx context.Context, target string) (*KytClient, *grpc.ClientConn, error) {
-	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	creds, err := transportCredentials()
+	if err != nil {
+		return nil, nil, fmt.Errorf("kyt tls: %w", err)
+	}
+	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, nil, fmt.Errorf("kyt dial %s: %w", target, err)
 	}
@@ -173,7 +242,11 @@ type MpcClient struct{ cc pbmpc.MpcSigningServiceClient }
 
 // NewMpc dials target and returns an MpcClient.
 func NewMpc(ctx context.Context, target string) (*MpcClient, *grpc.ClientConn, error) {
-	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	creds, err := transportCredentials()
+	if err != nil {
+		return nil, nil, fmt.Errorf("mpc tls: %w", err)
+	}
+	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, nil, fmt.Errorf("mpc dial %s: %w", target, err)
 	}
@@ -195,11 +268,17 @@ func (c *MpcClient) Sign(ctx context.Context, req partner.MpcSignRequest) (partn
 
 // BlockchainClient wraps the generated gRPC client and implements
 // partner.Blockchain.
-type BlockchainClient struct{ cc pbblockchain.BlockchainGatewayClient }
+type BlockchainClient struct {
+	cc pbblockchain.BlockchainGatewayClient
+}
 
 // NewBlockchain dials target and returns a BlockchainClient.
 func NewBlockchain(ctx context.Context, target string) (*BlockchainClient, *grpc.ClientConn, error) {
-	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	creds, err := transportCredentials()
+	if err != nil {
+		return nil, nil, fmt.Errorf("blockchain tls: %w", err)
+	}
+	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, nil, fmt.Errorf("blockchain dial %s: %w", target, err)
 	}
@@ -231,11 +310,17 @@ func (c *BlockchainClient) Status(ctx context.Context, txHash string) (partner.B
 // --- ledger ------------------------------------------------------------------
 
 // LedgerClient wraps the generated gRPC client and implements partner.Ledger.
-type LedgerClient struct{ cc pbledger.LedgerAccountingClient }
+type LedgerClient struct {
+	cc pbledger.LedgerAccountingClient
+}
 
 // NewLedger dials target and returns a LedgerClient.
 func NewLedger(ctx context.Context, target string) (*LedgerClient, *grpc.ClientConn, error) {
-	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	creds, err := transportCredentials()
+	if err != nil {
+		return nil, nil, fmt.Errorf("ledger tls: %w", err)
+	}
+	cc, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, nil, fmt.Errorf("ledger dial %s: %w", target, err)
 	}
